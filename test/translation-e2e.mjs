@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const browser=await chromium.launch({channel:'msedge',headless:true});
 try{
  const page=await browser.newPage();
- await page.route('https://translation.test/',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><body></body>'}));await page.goto('https://translation.test/');
+ await page.route('http://translation.test/',r=>r.fulfill({contentType:'text/html',body:'<!doctype html><body></body>'}));await page.goto('http://translation.test/');
  await page.setContent('<main><h1>Account settings</h1><button id="save">Save changes</button><p>Never share your secret key.</p><input value="private input"><textarea>private draft</textarea><code>private code</code><div contenteditable>private edit</div><div hidden>hidden secret</div><span>sk-abcdefghijklmnopqrstuvwxyz0123456789</span><div id="dynamic"></div></main>');
  const script=await fs.readFile('native/page-translation.js','utf8');
  await page.evaluate(source=>{window.translate=eval('('+source+')');window.clicked=0;document.querySelector('#save').addEventListener('click',()=>window.clicked++);},script);
@@ -35,7 +35,7 @@ try{
  await page.locator('#translate-original').click();assert.equal(await page.locator('#save').textContent(),'Save changes');
  await page.locator('#translate-auto').check();await page.waitForFunction(()=>document.querySelector('#save').textContent==='変更を保存');
  assert.equal(await page.evaluate(()=>window.saved),1);
- assert.deepEqual(await page.evaluate(()=>window.translationState.ui.translationOrigins),['https://translation.test']);
+ assert.deepEqual(await page.evaluate(()=>window.translationState.ui.translationOrigins),['http://translation.test']);
  await page.locator('#translate-auto').uncheck();const before=await page.evaluate(()=>window.translationCalls);
  await page.evaluate(()=>window.controller.event({type:'browser.translation-dirty',id:'web'}));assert.equal(await page.evaluate(()=>window.translationCalls),before);
  assert.deepEqual(await page.evaluate(()=>window.errors),[]);
