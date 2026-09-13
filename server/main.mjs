@@ -236,6 +236,7 @@ bridge.on("notification", (m) => {
         text: "",
       };
       item.text += p.delta;
+      item.turnId = p.turnId || t.activeTurn;
       liveItems.set(key, item);
       emit("delta", p);
       break;
@@ -244,12 +245,13 @@ bridge.on("notification", (m) => {
     case "item/completed": {
       const item = p.item ? publicItem(p.item) : null;
       if (!item) break;
+      item.turnId = p.turnId || t.activeTurn;
       if (item.aggregatedOutput?.length > 20000)
         item.aggregatedOutput = item.aggregatedOutput.slice(-20000);
       while (liveItems.size > 500)
         liveItems.delete(liveItems.keys().next().value);
       liveItems.set(t.id + ":" + item.id, item);
-      emit("item", { threadId: t.id, item });
+      emit("item", { threadId: t.id, turnId: item.turnId, item });
       if (m.method === "item/completed") {
         if (item.type === "agentMessage") {
           t.lastReplyAt = Date.now();
@@ -1031,7 +1033,7 @@ const server = http.createServer(async (req, res) => {
           return json(res, {
             ...result,
             live: [...liveItems.entries()]
-              .filter(([k]) => k.startsWith(t.id + ":"))
+              .filter(([k, item]) => k.startsWith(t.id + ":") && t.activeTurn && item.turnId === t.activeTurn)
               .map(([, v]) => v),
           });
         }

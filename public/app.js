@@ -5,7 +5,7 @@ import DOMPurify from "/vendor/purify.js";
 import { usageSummary, usageHTML } from "./usage.js";
 import { hasConversation, taskLane, laneNames } from "./tasks.js";
 import { applyTheme, normalizeTheme, themePresets, fontPresets } from "./theme.js";
-import { mergeRecentHistory } from "./history.js";
+import { mergeRecentHistory, conversationItems } from "./history.js";
 import {
   shortcutDefinitions,
   defaultShortcutBindings,
@@ -614,12 +614,7 @@ function mergeHistory(id, result) {
   state.histories.set(id, mergeRecentHistory(state.histories.get(id), result));
 }
 function allItems(history) {
-  if (!history) return [];
-  const items = new Map();
-  for (const turn of history.turns)
-    for (const i of turn.items || []) items.set(i.id, i);
-  for (const [id, i] of history.live) items.set(id, i);
-  return [...items.values()];
+  return conversationItems(history, task()?.activeTurn);
 }
 function conversationHTML(items) {
   let html = "", group = [];
@@ -1302,7 +1297,8 @@ function handleEvent(e) {
       h = { turns: [], live: new Map() };
       state.histories.set(p.threadId, h);
     }
-    if (e.type === "item") h.live.set(p.item.id, p.item);
+    const turnId = p.turnId || state.tasks.find(t => t.id === p.threadId)?.activeTurn;
+    if (e.type === "item") h.live.set(p.item.id, { ...p.item, turnId });
     else {
       const item = h.live.get(p.itemId) || {
         id: p.itemId,
@@ -1310,6 +1306,7 @@ function handleEvent(e) {
         text: "",
       };
       item.text += p.delta;
+      item.turnId = turnId;
       h.live.set(p.itemId, item);
     }
     if (state.active === p.threadId) scheduleConversation();
