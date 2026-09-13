@@ -14,14 +14,22 @@ try{
  const other=new URL(ready.url);other.searchParams.set('window','window-2');await peer.goto(other.href);
  await page.locator('#open-web-home').click();await page.locator('#address').fill('https://example.org/research');await page.locator('#address').press('Enter');
  await page.locator('#bookmark-page').click();await page.locator('#bookmark-page').filter({hasText:'★'}).waitFor();
- await peer.locator('#app-menu summary').click();await peer.locator('#menu-bookmarks').click();await peer.locator('.bookmark-row').waitFor();
+ // Open from a file pane: no Web tab is required.
+ await peer.locator('#rail-bookmarks').click();await peer.locator('.bookmark-row').waitFor();
  assert.equal(await peer.locator('.bookmark-row').count(),1);
  await peer.locator('[data-bookmark-edit]').click();await peer.locator('#bookmark-title').fill('調査の参考資料');await peer.locator('#bookmark-save').click();await peer.locator('.bookmark-row').filter({hasText:'調査の参考資料'}).waitFor();
+ await peer.locator('#bookmark-new-folder').click();await peer.locator('#bookmark-title').fill('制作');await peer.locator('#bookmark-save').click();
+ await peer.locator('[data-bookmark-open]').filter({hasText:'制作'}).click();
+ await peer.locator('#bookmark-new-folder').click();await peer.locator('#bookmark-title').fill('資料');await peer.locator('#bookmark-save').click();await peer.locator('#bookmark-root').click();
+ await peer.locator('.bookmark-row').filter({hasText:'調査の参考資料'}).locator('[data-bookmark-edit]').click();
+ await peer.locator('#bookmark-folder').selectOption({label:'制作 / 資料'});await peer.locator('#bookmark-save').click();
+ await peer.locator('[data-bookmark-open]').filter({hasText:'制作'}).click();await peer.locator('[data-bookmark-open]').filter({hasText:'資料'}).click();
  await peer.locator('#bookmark-search').fill('存在しない');assert.equal(await peer.locator('.bookmark-row').count(),0);await peer.locator('#bookmark-search').fill('参考資料');
  await peer.locator('[data-bookmark-open]').click();await peer.locator('#address').waitFor();assert.equal(await peer.locator('#address').inputValue(),'https://example.org/research');
  await page.reload();await page.locator('#bookmark-page').filter({hasText:'★'}).waitFor();await page.locator('#show-bookmarks').click();
+ await page.locator('[data-bookmark-open]').filter({hasText:'制作'}).click();await page.locator('[data-bookmark-open]').filter({hasText:'資料'}).click();
  assert.match(await page.locator('#bookmark-results').textContent(),/調査の参考資料/);
- const saved=JSON.parse(await fs.readFile(path.join(ready.data,'workspace.json'),'utf8'));assert.equal(saved.bookmarks.length,1);
+ const saved=JSON.parse(await fs.readFile(path.join(ready.data,'workspace.json'),'utf8'));assert.equal(saved.bookmarks.length,3);
  await page.screenshot({path:'.test-data/bookmarks.png'});
  await page.locator('[data-bookmark-edit]').click();await page.locator('#bookmark-remove').click();await page.locator('#bookmark-results .empty').waitFor();
  await peer.locator('#bookmark-page').filter({hasText:'☆'}).waitFor();assert.deepEqual(errors,[]);

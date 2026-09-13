@@ -25,6 +25,8 @@ jobs:
       - run: npm test
       - run: node test/ui-check.mjs
       - run: node test/ui-history.mjs
+      - run: node test/bookmarks-e2e.mjs
+      - run: node test/translation-e2e.mjs
       - run: node test/vertical-tabs-e2e.mjs
       - run: node test/csv-e2e.mjs
       - name: Build and verify package

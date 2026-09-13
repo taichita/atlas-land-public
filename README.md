@@ -16,6 +16,7 @@
 - Markdown、CSV、テキストの閲覧・編集。下書き、外部変更の検知、保存前バックアップ。
 - HTML、PDF、画像、対応する音声・動画のプレビュー。
 - [メモ](docs/quick-notes.md)、[ブックマーク](docs/bookmarks.md)、[外観設定](docs/appearance.md)。
+- [ページの日本語訳](docs/translation.md)。既存Codex接続を利用し、サイトごとの自動翻訳に対応。
 - V/Zで動画速度を0.25倍ずつ変更。[ショートカット](docs/shortcuts-and-local-tools.md)は変更可能。
 - 案件・フォルダ・成果物の関係を3Dで表示。
 

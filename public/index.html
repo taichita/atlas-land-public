@@ -74,6 +74,7 @@
           <div id="workspace-deck"><div id="primary-slot">
           <nav id="pane-tabbar" class="pane-tabbar" aria-label="このペインのタブ" data-expanded="false">
             <button id="tab-rail-toggle" aria-label="タブ一覧を開く" aria-expanded="false" aria-controls="work-tabs">▥<span class="rail-label">タブ <small id="tab-count"></small></span></button>
+            <button id="rail-bookmarks" title="ブックマーク（Ctrl+Shift+O）" aria-label="ブックマークを開く">★<span class="rail-label">ブックマーク</span></button>
             <input id="tab-search" type="search" placeholder="タブを検索" aria-label="タブを検索" />
             <div id="work-tabs" class="work-tabs"></div><div class="tab-actions"><button id="new-note" aria-label="＋ メモ" title="新しいメモ（Ctrl+Alt+N）"><span>＋</span><span class="rail-label">メモ</span></button><button id="open-web-home" aria-label="＋ Web" title="このペインに新しいWebタブを開く"><span>◎</span><span class="rail-label">Web</span></button><button id="open-files-home" aria-label="＋ ファイル" title="このペインでファイルを開く"><span>▱</span><span class="rail-label">ファイル</span></button></div>
           </nav>
@@ -94,6 +95,7 @@
               /><button type="submit">開く</button><button type="button" id="bookmark-page" aria-label="このページをブックマーク" title="ブックマーク（Ctrl+D）">☆</button><button type="button" id="show-bookmarks">ブックマーク</button>
             </form>
             <div class="browser-tools">
+              <button id="translate-page" title="Codexでページの文章を日本語に翻訳">日本語訳</button><button id="translate-original" hidden>原文</button><label title="このサイトを開いたときにCodexで翻訳"><input id="translate-auto" type="checkbox">自動翻訳</label>
               <button id="share-page">このページをAIへ添付</button
               ><button id="suspend-tabs">他のタブを休止</button
               ><label

@@ -1671,6 +1671,10 @@ dialog { background: var(--surface); border-color: color-mix(in srgb, var(--acce
 #pane-tabbar[data-expanded=true] {width:280px;box-shadow:12px 0 28px #0003}
 #tab-rail-toggle {display:flex;align-items:center;gap:12px;flex-shrink:0;border:0;min-height:36px;padding:6px 10px;text-align:left;white-space:nowrap}
 #tab-count {color:var(--muted);font-weight:400;margin-left:8px}
+#rail-bookmarks {display:flex;gap:10px;align-items:center;flex-shrink:0;min-height:36px;padding:6px 10px;text-align:left;white-space:nowrap;color:var(--accent-ink,var(--accent))}
+.bookmark-toolbar {display:flex;align-items:center;gap:8px;margin-top:12px}
+#bookmark-location {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+#bookmark-folder {width:100%}
 #tab-search {box-sizing:border-box;width:100%;min-width:0;padding:8px 10px;font-size:12px;flex-shrink:0}
 #pane-tabbar .work-tabs {display:flex;flex-direction:column;align-items:stretch;gap:4px;flex:1;min-height:0;padding:0;overflow-x:hidden;overflow-y:auto;scrollbar-width:thin}
 #pane-tabbar .work-tab {width:100%;max-width:none;min-height:36px;flex-shrink:0;border:0;border-left:2px solid transparent;border-radius:7px;overflow:hidden}

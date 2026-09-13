@@ -18,6 +18,7 @@ import {
 import { paneMode, paneBridge, setupPanes } from "./pane-shell.js";
 import { fileLink } from './file-links.js';
 import {setupTabRail} from './tab-rail.js';
+import {setupPageTranslation} from './page-translation.js';
 const $ = (id) => document.getElementById(id),
   esc = (s) =>
     String(s ?? "").replace(
@@ -453,6 +454,7 @@ $("composer-toggle").addEventListener("click", () => {
   if (expanded) $("prompt").focus();
 });
 async function selectTask(id, advanceEpoch = true, seeReply = true) {
+  if(state.active!==id||state.activeView!=='task:'+id)conversationBottomPending=id;
   if (advanceEpoch) viewEpoch++;
   stashDraft();
   state.active = id;
@@ -662,6 +664,7 @@ function itemHTML(i) {
   return `<details class="tool-summary" data-item="${esc(i.id)}"><summary>${esc(names[i.type])} <span>· ${esc(i.status || "記録")}</span></summary><pre>${esc(detail)}${i.aggregatedOutput ? "\n\n" + esc(i.aggregatedOutput.slice(-10000)) : ""}</pre></details>`;
 }
 const welcomeHTML = $("conversation").innerHTML;
+let conversationBottomPending=null;
 function renderConversation() {
   const t = task();
   if (!t) {
@@ -671,9 +674,10 @@ function renderConversation() {
     );
     return;
   }
+  const changed=$("conversation").dataset.task!==t.id;
   $("conversation").dataset.task = t.id;
   const history = state.histories.get(t.id),
-    nearBottom =
+    nearBottom = changed || conversationBottomPending===t.id ||
       $("conversation").scrollHeight -
         $("conversation").scrollTop -
         $("conversation").clientHeight <
@@ -701,6 +705,7 @@ function renderConversation() {
   for (const el of $("conversation").querySelectorAll("[data-process]")) if (opened.has(el.dataset.process)) el.open = true;
   if (nearBottom) $("conversation").scrollTop = $("conversation").scrollHeight;
   else $("conversation").scrollTop = oldScroll;
+  if(history&&conversationBottomPending===t.id)conversationBottomPending=null;
 }
 $("conversation").addEventListener("click", async (e) => {
   try {
@@ -1864,25 +1869,39 @@ async function bookmarkPage(){
   if(existing){editBookmarkDialog(existing);return;}
   await saveBookmark({url:page.url,title:page.title});toast('ブックマークに追加しました');
 }
+let bookmarkFolder=null;
+function folderPath(id){
+  const parts=[],seen=new Set();
+  while(id&&!seen.has(id)){seen.add(id);const folder=(state.bookmarks||[]).find(b=>b.id===id&&b.kind==='folder');if(!folder)break;parts.unshift(folder.title);id=folder.parentId;}
+  return parts.join(' / ');
+}
 function renderBookmarkList(){
   if(!$('bookmark-results'))return;
-  const query=$('bookmark-search').value.trim().toLocaleLowerCase();
-  const found=(state.bookmarks||[]).filter(b=>(b.title+' '+b.url).toLocaleLowerCase().includes(query));
-  $('bookmark-results').innerHTML=found.length?found.map(b=>`<div class="bookmark-row"><button class="bookmark-open" data-bookmark-open="${esc(b.id)}" title="${esc(b.url)}"><strong>${esc(b.title)}</strong><span>${esc(b.url)}</span></button><button data-bookmark-edit="${esc(b.id)}" aria-label="${esc(b.title)}を編集">編集</button></div>`).join(''):`<div class="empty">${query?'見つかりませんでした':'ブックマークはまだありません'}</div>`;
+  const query=$('bookmark-search').value.trim().toLocaleLowerCase(),all=state.bookmarks||[];
+  if(bookmarkFolder&&!all.some(b=>b.id===bookmarkFolder&&b.kind==='folder'))bookmarkFolder=null;
+  $('bookmark-location').textContent=folderPath(bookmarkFolder)||'すべて';$('bookmark-up').disabled=!bookmarkFolder;
+  const found=all.filter(b=>query?(b.title+' '+(b.url||'')+' '+folderPath(b.parentId)).toLocaleLowerCase().includes(query):(b.parentId||null)===bookmarkFolder).sort((a,b)=>Number(b.kind==='folder')-Number(a.kind==='folder'));
+  $('bookmark-results').innerHTML=found.length?found.map(b=>`<div class="bookmark-row"><button class="bookmark-open" data-bookmark-open="${esc(b.id)}" title="${esc(b.url||folderPath(b.id))}"><strong>${b.kind==='folder'?'▸ ▱ ':''}${esc(b.title)}</strong><span>${esc(b.kind==='folder'?all.filter(x=>x.parentId===b.id).length+' 件':b.url)}</span></button><button data-bookmark-edit="${esc(b.id)}" aria-label="${esc(b.title)}を編集">編集</button></div>`).join(''):`<div class="empty">${query?'見つかりませんでした':'まだ項目がありません'}</div>`;
 }
 async function showBookmarks(){
   $('app-menu').open=false;state.bookmarks=await api('/bookmarks');
-  openDialog(dialogHeader('ブックマーク')+'<input id="bookmark-search" type="search" placeholder="名前・URLで検索" aria-label="ブックマークを検索" style="width:100%;margin:10px 0"><div id="bookmark-results"></div>');
+  openDialog(dialogHeader('ブックマーク')+'<div class="bookmark-toolbar"><button id="bookmark-up" aria-label="親フォルダーへ">←</button><button id="bookmark-root">すべて</button><span id="bookmark-location"></span><button id="bookmark-new-folder">＋ フォルダー</button></div><input id="bookmark-search" type="search" placeholder="名前・URLで検索" aria-label="ブックマークを検索" style="width:100%;margin:10px 0"><div id="bookmark-results"></div>');
   $('bookmark-search').oninput=renderBookmarkList;
-  $('bookmark-results').onclick=event=>{const open=event.target.closest('[data-bookmark-open]'),edit=event.target.closest('[data-bookmark-edit]'),id=open?.dataset.bookmarkOpen||edit?.dataset.bookmarkEdit,b=(state.bookmarks||[]).find(b=>b.id===id);if(!b)return;if(open){closeDialog();openWeb(b.url).catch(e=>toast(e.message));}else editBookmarkDialog(b);};
+  $('bookmark-up').onclick=()=>{bookmarkFolder=state.bookmarks.find(b=>b.id===bookmarkFolder)?.parentId||null;renderBookmarkList();};
+  $('bookmark-root').onclick=()=>{bookmarkFolder=null;$('bookmark-search').value='';renderBookmarkList();};
+  $('bookmark-new-folder').onclick=()=>editBookmarkDialog({kind:'folder',title:'',parentId:bookmarkFolder});
+  $('bookmark-results').onclick=event=>{const open=event.target.closest('[data-bookmark-open]'),edit=event.target.closest('[data-bookmark-edit]'),id=open?.dataset.bookmarkOpen||edit?.dataset.bookmarkEdit,b=(state.bookmarks||[]).find(b=>b.id===id);if(!b)return;if(edit)editBookmarkDialog(b);else if(b.kind==='folder'){bookmarkFolder=b.id;$('bookmark-search').value='';renderBookmarkList();}else{closeDialog();openWeb(b.url).catch(e=>toast(e.message));}};
   renderBookmarkList();$('bookmark-search').focus();
 }
 function editBookmarkDialog(bookmark){
-  openDialog(dialogHeader('ブックマークを編集')+`<div class="bookmark-edit"><label for="bookmark-title">名前</label><input id="bookmark-title" value="${esc(bookmark.title)}"><label for="bookmark-url">URL</label><input id="bookmark-url" value="${esc(bookmark.url)}"></div><p id="bookmark-error" class="request-error" role="alert"></p><div class="dialog-actions"><button id="bookmark-remove">削除</button><span class="spacer"></span><button id="bookmark-cancel">キャンセル</button><button id="bookmark-save" class="primary">保存</button></div>`);
-  const submit=async remove=>{try{await saveBookmark(remove?{id:bookmark.id,remove:true}:{id:bookmark.id,title:$('bookmark-title').value,url:$('bookmark-url').value});await showBookmarks();}catch(e){$('bookmark-error').textContent=e.message;}};
+  const folder=bookmark.kind==='folder',choices=(state.bookmarks||[]).filter(b=>b.kind==='folder'&&b.id!==bookmark.id);
+  openDialog(dialogHeader(folder?'フォルダー':'ブックマークを編集')+`<div class="bookmark-edit"><label for="bookmark-title">名前</label><input id="bookmark-title" value="${esc(bookmark.title)}">${folder?'':`<label for="bookmark-url">URL</label><input id="bookmark-url" value="${esc(bookmark.url)}">`}<label for="bookmark-folder">保存先</label><select id="bookmark-folder"><option value="">すべて</option>${choices.map(f=>`<option value="${esc(f.id)}" ${bookmark.parentId===f.id?'selected':''}>${esc(folderPath(f.id))}</option>`).join('')}</select></div><p id="bookmark-error" class="request-error" role="alert"></p><div class="dialog-actions"><button id="bookmark-remove" ${bookmark.id?'':'hidden'}>削除</button><span class="spacer"></span><button id="bookmark-cancel">キャンセル</button><button id="bookmark-save" class="primary">保存</button></div>`);
+  const submit=async remove=>{try{await saveBookmark(remove?{id:bookmark.id,remove:true}:{id:bookmark.id,kind:bookmark.kind,title:$('bookmark-title').value,url:$('bookmark-url')?.value,parentId:$('bookmark-folder').value});await showBookmarks();}catch(e){$('bookmark-error').textContent=e.message;}};
   $('bookmark-save').onclick=()=>submit(false);$('bookmark-remove').onclick=()=>submit(true);$('bookmark-cancel').onclick=()=>showBookmarks().catch(e=>toast(e.message));
 }
 action('bookmark-page',bookmarkPage);action('show-bookmarks',showBookmarks);action('menu-bookmarks',showBookmarks);
+action('rail-bookmarks',()=>{bookmarkFolder=null;return showBookmarks();});
+const pageTranslation=setupPageTranslation({host,api,state,save:prefs,toast});
 function normalizeURL(value) {
   value = value.trim();
   if (/^https?:\/\//i.test(value)) return new URL(value).href;
@@ -1930,6 +1949,7 @@ async function openWeb(url, newTab = true) {
   }
 }
 function renderBrowserTabs() {
+  pageTranslation.render();
   renderBookmarkState();
   renderWorkTabs();
   const t = state.tabs.find((t) => t.id === state.activeTab);
@@ -2225,6 +2245,7 @@ if (native)
   paneBridge.addEventListener("message", (e) => {
     const m = e.data;
     if(!paneMode&&paneShell?.route(m))return;
+    pageTranslation.event(m);
     if (m.type === "shortcut") {
       if(!paneMode&&document.activeElement?.id==='secondary-frame'&&m.command==='address'){document.activeElement.contentWindow.postMessage({channel:'atlas-pane-v1',type:'native',message:m},location.origin);return;}
       runShortcut(m.command, m.id).catch((error) => toast(error.message));

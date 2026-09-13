@@ -8,3 +8,12 @@ test('bookmark registration is idempotent, edits preserve identity and unsafe UR
  for(const url of ['javascript:alert(1)','file:///C:/secret','https://user:password@example.com','data:text/html,x'])assert.throws(()=>editBookmark(list,{url}));
  editBookmark(list,{id:first.id,remove:true});assert.equal(list.length,0);
 });
+test('nested folders preserve legacy bookmarks, reject cycles and nonempty deletion',()=>{
+ const list=[],link=editBookmark(list,{url:'https://example.org',title:'legacy'}),folder=editBookmark(list,{kind:'folder',title:'Work'}),child=editBookmark(list,{kind:'folder',title:'Docs',parentId:folder.id});
+ editBookmark(list,{...link,parentId:child.id});assert.equal(list.find(x=>x.id===link.id).parentId,child.id);
+ assert.throws(()=>editBookmark(list,{...folder,parentId:child.id}));
+ assert.throws(()=>editBookmark(list,{id:child.id,remove:true}));
+ assert.throws(()=>editBookmark(list,{...link,parentId:link.id}));
+ editBookmark(list,{...link,parentId:null});editBookmark(list,{id:child.id,remove:true});
+ assert.equal(list.find(x=>x.id===link.id).url,'https://example.org/');
+});

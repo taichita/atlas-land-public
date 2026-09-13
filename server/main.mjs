@@ -3,6 +3,7 @@ import {windowState} from './windows.mjs';
 import {normalizeTheme} from '../public/theme.js';
 import {noteFolder,createNote,saveNote} from './notes.mjs';
 import {editBookmark} from './bookmarks.mjs';
+import {PageTranslator} from './translation.mjs';
 import {uploadImage,selectedImages,imagePath,imageInputs,sentImages} from './images.mjs';
 import http from "node:http";
 import fs from "node:fs/promises";
@@ -36,6 +37,9 @@ const dataDir =
   );
 const store = new StateStore(dataDir),
   bridge = new CodexBridge();
+const translationDir=path.join(dataDir,'translation');
+await fs.mkdir(translationDir,{recursive:true});
+const pageTranslator=new PageTranslator(bridge,translationDir);
 let codexLimits = null;
 const defaultFolder = process.env.GPT_ATLAS_DEFAULT_FOLDER || (await fs.stat('C:\\dev').then(s=>s.isDirectory()).catch(()=>false) ? 'C:\\dev' : os.homedir());
 async function refreshUsage() {
@@ -747,7 +751,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
       if(pathname==='/api/agent-policy'){
-        if(req.method==='GET')return json(res,{instructions:policyFor(store.data),defaults:defaultPolicy});
+        if(req.method==='GET')return json(res,{instructions:store.data.agentPolicy??defaultPolicy,defaults:defaultPolicy});
         if(req.method!=='POST')fail('Method not allowed',405);
         if(typeof b.instructions!=='string'||b.instructions.length>6000)fail('実行方針は6000文字以内で入力してください');
         store.data.agentPolicy=b.instructions.trim();store.save();return json(res,{ok:true});
@@ -759,6 +763,7 @@ const server = http.createServer(async (req, res) => {
         if(req.method!=='POST')fail('Method not allowed',405);
         editBookmark(store.data.bookmarks,b);store.flush();emit('bookmarks',store.data.bookmarks);return json(res,store.data.bookmarks);
       }
+      if(pathname==='/api/translate'&&req.method==='POST')return json(res,{translations:await pageTranslator.translate(b.texts)});
       if(pathname==='/api/appearance'&&req.method==='POST'){
         const appearance={theme:normalizeTheme(b.theme),bodySize:Math.max(14,Math.min(24,Number(b.bodySize)||16))};
         store.data.appearance=appearance;store.save();emit('appearance',appearance);return json(res,appearance);

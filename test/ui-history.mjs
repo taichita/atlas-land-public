@@ -21,10 +21,10 @@ try {
   await page.route('**/api/bootstrap',async route => {
     const response = await route.fetch();
     const b = await response.json();
-    b.tasks=[task]; b.tabs=[]; b.links=[]; b.ui={appearanceVersion:3,active:task.id,open:[task.id],viewTabs:[],drafts:{}};
+    b.tasks=[task,{...task,id:'history-second',title:'Second chat'}]; b.tabs=[]; b.links=[]; b.ui={appearanceVersion:3,active:task.id,open:[task.id],viewTabs:[],drafts:{}};
     await route.fulfill({response,json:b});
   });
-  await page.route('**/api/tasks/history-fixture/**',async route => {
+  await page.route('**/api/tasks/history-*/**',async route => {
     const u = new URL(route.request().url());
     if(u.pathname.endsWith('/history')) {
       const older=u.searchParams.has('cursor');
@@ -38,6 +38,12 @@ try {
   assert.equal(await page.locator('#conversation .message').count(),24);
   assert.equal(await page.locator('#conversation .message').first().innerText(),'\u3042\u306a\u305f\nQuestion 5');
   assert.match(await page.locator('#conversation .message').last().innerText(),/Answer 16$/);
+  const atBottom=()=>page.locator('#conversation').evaluate(el=>el.scrollHeight-el.clientHeight-el.scrollTop<5);
+  assert(await atBottom(),'initial history opens at newest reply');
+  await page.locator('#conversation').evaluate(el=>el.scrollTop=0);
+  await page.locator('[data-task="history-second"]').click();await page.waitForFunction(()=>document.querySelector('#conversation').dataset.task==='history-second');
+  assert(await atBottom(),'switch to another chat starts at its newest reply');
+  await page.locator('[data-task="history-fixture"]').click();assert(await atBottom(),'switching back also opens newest reply');
   await page.locator('#load-older').click();
   await page.waitForFunction(()=>document.querySelectorAll('#conversation .message').length===32);
   assert.match(await page.locator('#conversation .message').first().innerText(),/Question 1$/);

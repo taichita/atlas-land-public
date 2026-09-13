@@ -31,11 +31,12 @@ foreach($taskName in @('AtlasLand.exe','AtlasLand.exe.config','Microsoft.Web.Web
  Copy-ReleaseFile (Join-Path $taskRoot "$BuildDirectory\$taskName") "dist\$taskName"
 }
 Copy-ReleaseFile (Join-Path $taskRoot 'native\media-shortcuts.js') 'native\media-shortcuts.js'
+Copy-ReleaseFile (Join-Path $taskRoot 'native\page-translation.js') 'native\page-translation.js'
 Copy-ReleaseFile (Join-Path $taskRoot 'scripts\claude-statusline.mjs') 'scripts\claude-statusline.mjs'
 Copy-ReleaseFile (Join-Path $taskRoot 'docs\preview-start.md') 'はじめに.md'
 Copy-ReleaseFile (Join-Path $taskRoot 'docs\shortcuts-and-local-tools.md') '操作方法.md'
 Copy-ReleaseFile (Join-Path $taskRoot 'docs\workplace-review.md') '職場での利用確認.md'
-foreach($taskDoc in @('multiple-windows','appearance','quick-notes','bookmarks','vertical-tabs','updates')){
+foreach($taskDoc in @('multiple-windows','appearance','quick-notes','bookmarks','vertical-tabs','translation','updates')){
  Copy-ReleaseFile (Join-Path $taskRoot "docs\$taskDoc.md") "docs\$taskDoc.md"
 }
 Copy-ReleaseFile (Join-Path $taskRoot 'node_modules\safer-buffer\LICENSE') 'licenses\safer-buffer-LICENSE.txt'

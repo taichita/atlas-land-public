@@ -101,6 +101,12 @@ class Workspace : Form {
   else if(action=="browser.back"&&pages.ContainsKey(id)){if(pages[id].CoreWebView2.CanGoBack)pages[id].CoreWebView2.GoBack();}
   else if(action=="browser.forward"&&pages.ContainsKey(id)){if(pages[id].CoreWebView2.CanGoForward)pages[id].CoreWebView2.GoForward();}
   else if(action=="browser.reload"&&pages.ContainsKey(id))pages[id].CoreWebView2.Reload();
+  else if(action=="browser.translation"&&pages.ContainsKey(id)){
+   string mode=Str(m,"mode");if(mode!="collect"&&mode!="apply"&&mode!="restore"&&mode!="auto")throw new Exception("未対応の翻訳操作です");
+   string script=File.ReadAllText(Path.Combine(appDir,"native","page-translation.js"));
+   string result=await pages[id].CoreWebView2.ExecuteScriptAsync("("+script+")("+json.Serialize(mode)+","+json.Serialize(m.ContainsKey("payload")?m["payload"]:null)+")");
+   Post(new{type="response",requestId=requestId,result=json.DeserializeObject(result)});return;
+  }
   else if(action=="browser.read"&&pages.ContainsKey(id)){string result=await pages[id].CoreWebView2.ExecuteScriptAsync("(()=>({title:document.title,url:location.href,text:(getSelection().toString()||document.body.innerText).slice(0,40000),links:Array.from(document.querySelectorAll('a[href]')).slice(0,60).map(a=>({text:a.innerText.slice(0,120),url:a.href}))}))()");Post(new{type="response",requestId=requestId,result=json.DeserializeObject(result)});return;}
   else if(action=="browser.speed"&&pages.ContainsKey(id)){double speed=Convert.ToDouble(m["speed"]);if(speed<0.25||speed>8)throw new Exception("速度は0.25〜8倍で指定してください");string speedText=speed.ToString(System.Globalization.CultureInfo.InvariantCulture);string count=await pages[id].CoreWebView2.ExecuteScriptAsync("(()=>{let v=document.querySelectorAll('video,audio');v.forEach(x=>x.playbackRate="+speedText+");return v.length})()");Post(new{type="response",requestId=requestId,result=json.DeserializeObject(count)});return;}
   else if(action=="chooseFolder"){HidePages();using(var picker=new FolderBrowserDialog{Description="作業フォルダ",SelectedPath=Str(m,"path",@"C:\dev"),ShowNewFolderButton=true}){string selected=picker.ShowDialog(this)==DialogResult.OK?picker.SelectedPath:null;Post(new{type="response",requestId=requestId,result=selected});}LayoutPage();return;}
@@ -125,6 +131,13 @@ class Workspace : Form {
   var page=new WebView2{Visible=false,DefaultBackgroundColor=Color.White};Controls.Add(page);pages.Add(id,page);var pageOptions=browsing.CreateCoreWebView2ControllerOptions();pageOptions.ProfileName="Browsing";await page.EnsureCoreWebView2Async(browsing,pageOptions);
   // Let the browser show its own save/update prompt; credentials stay in its profile.
   page.CoreWebView2.Settings.IsPasswordAutosaveEnabled=true;
+  page.CoreWebView2.ContextMenuRequested+=(s,e)=>{
+   var item=browsing.CreateContextMenuItem("日本語に翻訳",null,CoreWebView2ContextMenuItemKind.Command);
+   item.CustomItemSelected+=(sender,args)=>Post(new{type="browser.translate-request",id=id});
+   e.MenuItems.Insert(0,item);
+  };
+  page.CoreWebView2.WebMessageReceived+=(s,e)=>{try{var msg=json.Deserialize<Dictionary<string,object>>(e.WebMessageAsJson);if(Str(msg,"type")=="atlas.translation.dirty")Post(new{type="browser.translation-dirty",id=id});}catch{}};
+  page.CoreWebView2.NavigationCompleted+=(s,e)=>{if(e.IsSuccess)Post(new{type="browser.translation-ready",id=id,url=page.CoreWebView2.Source});};
   BindShortcuts(page,id);page.Enter+=(s,e)=>Post(new{type="browser.focused",id=id});page.CoreWebView2.WebMessageReceived+=(s,e)=>MediaStep(page,e);
   await page.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(File.ReadAllText(Path.Combine(appDir,"native","media-shortcuts.js")));
   page.CoreWebView2.DOMContentLoaded+=(s,e)=>MediaSettings(page);
