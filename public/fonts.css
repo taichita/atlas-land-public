@@ -1,0 +1,28 @@
+@font-face {
+  font-family: "Shippori Mincho";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/1.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Shippori Mincho";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(/fonts/2.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Zen Kaku Gothic New";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/fonts/3.woff2) format("woff2");
+}
+@font-face {
+  font-family: "Zen Kaku Gothic New";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(/fonts/4.woff2) format("woff2");
+}

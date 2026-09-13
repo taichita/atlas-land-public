@@ -1,0 +1,58 @@
+// Full Atlas UI + HTTP + JSON-RPC round trip against a local fake, never a model.
+import {chromium} from 'playwright-core';
+import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
+import {spawn} from 'node:child_process';import {createInterface} from 'node:readline';
+import assert from 'node:assert/strict';
+const root=process.cwd(),dir=await fs.mkdtemp(path.join(os.tmpdir(),'atlas-paste-')),log=path.join(dir,'rpc.jsonl');
+await fs.copyFile('test/fake-app-server.cjs',path.join(dir,'app-server'));
+await fs.writeFile(path.join(dir,'workspace.json'),JSON.stringify({tasks:[{id:'image-test',title:'画像と承認のテスト',cwd:dir,state:'idle',hasConversation:true,edits:[],events:[],files:[]}],tabs:[],links:[],ui:{active:'image-test',open:['image-test'],activeView:'task:image-test',viewTabs:[{key:'task:image-test',kind:'task',id:'image-test'}],appearanceVersion:3}}));
+const child=spawn(process.execPath,[path.join(root,'server/main.mjs')],{cwd:dir,windowsHide:true,env:{...process.env,AI_WORKSPACE_CODEX:process.execPath,AI_WORKSPACE_DATA:dir,LOCALAPPDATA:dir,CODEX_HOME:path.join(dir,'codex'),GPT_ATLAS_DESKTOP_SYNC:'0',ATLAS_FAKE_LOG:log},stdio:['ignore','pipe','pipe']});
+const ready=await new Promise((resolve,reject)=>{createInterface({input:child.stdout}).once('line',l=>resolve(JSON.parse(l)));child.once('error',reject);});
+const url=new URL(ready.url),headers={'x-workspace-token':url.hash.slice(1),'Content-Type':'application/json'};
+const browser=await chromium.launch({channel:'msedge',headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000}});
+page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+const api=async(p,b)=>{const r=await fetch(url.origin+'/api'+p,{headers,method:b===undefined?'GET':'POST',...(b===undefined?{}:{body:JSON.stringify(b)})});return r.json();};
+const rpc=async()=> (await fs.readFile(log,'utf8')).trim().split('\n').map(l=>JSON.parse(l));
+const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1kAAAAASUVORK5CYII=';
+const paste=()=>page.locator('#prompt').evaluate((el,data)=>{const bytes=Uint8Array.from(atob(data),c=>c.charCodeAt(0)),dt=new DataTransfer();dt.items.add(new File([bytes],'copied.png',{type:'image/png'}));el.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:dt}));},png);
+try {
+ await page.goto(ready.url);await page.locator('#composer').waitFor();
+ await paste();await page.locator('.image-attachment img').waitFor();
+ await page.waitForFunction(()=>document.querySelector('.image-attachment img')?.naturalWidth===1);
+ assert.equal((await rpc()).filter(m=>m.method==='turn/start').length,0);
+ await page.reload();await page.locator('.image-attachment img').waitFor();
+ await page.locator('[data-image-remove]').click();await page.locator('.image-attachment').waitFor({state:'detached'});
+ await paste();await page.locator('.image-attachment img').waitFor();
+ // A failed dispatch keeps the image draft and sends nothing to the executor.
+ await page.route('**/api/tasks/image-test/send',r=>r.fulfill({status:503,contentType:'application/json',body:'{"error":"fixture send failure"}'}));
+ await page.locator('#send').click();await page.getByText('fixture send failure',{exact:true}).waitFor();
+ assert.equal(await page.locator('.image-attachment').count(),1);
+ await page.unroute('**/api/tasks/image-test/send');
+ await page.locator('#send').click();await page.locator('#conversation .image-thumb img').waitFor();
+ const call=(await rpc()).find(m=>m.method==='turn/start');
+ assert.equal(call.params.input.length,1);assert.equal(call.params.input[0].type,'localImage');
+ assert.deepEqual(await fs.readFile(call.params.input[0].path),Buffer.from(png,'base64'));
+ await page.locator('.image-attachment').waitFor({state:'detached'});
+ await page.waitForFunction(()=>!document.querySelector('#send').disabled);
+ await page.locator('#prompt').fill('ASK_FORM');await page.locator('#send').click();
+ await page.waitForFunction(()=>document.querySelectorAll('.request-card').length===2);
+ let first=page.locator('.request-card').first();
+ assert.equal(await first.getByLabel('操作',{exact:true}).inputValue(),'');
+ await first.locator('[data-answer=accept]').click();await first.locator('.request-error:not([hidden])').waitFor();
+ assert.equal((await rpc()).some(m=>m.id==='approval:one'&&m.result),false);
+ await first.getByLabel('操作',{exact:true}).selectOption('0');
+ await first.getByLabel('内容を確認しました',{exact:true}).selectOption('false');
+ await first.getByLabel('メモ',{exact:true}).fill('同期しても残す');
+ await api('/tasks/image-test/settings',{title:'画像と承認のテスト更新'});
+ assert.equal(await first.getByLabel('メモ',{exact:true}).inputValue(),'同期しても残す');
+ await first.locator('[data-answer=accept]').click();
+ await page.waitForFunction(()=>document.querySelectorAll('.request-card').length===1);
+ assert.equal((await api('/bootstrap')).tasks[0].state,'waiting');
+ assert.deepEqual((await rpc()).find(m=>m.id==='approval:one'&&m.result).result,{action:'accept',content:{decision:'allow',confirmed:false,note:'同期しても残す'}});
+ await page.locator('.request-card [data-answer=cancel]').click();
+ await page.locator('.request-card').waitFor({state:'detached'});
+ assert.deepEqual((await rpc()).find(m=>m.id==='approval:two'&&m.result).result,{action:'cancel',content:null});
+ assert.deepEqual(errors,[]);
+ await fs.mkdir(path.join(root,'.test-data'),{recursive:true});await page.screenshot({path:path.join(root,'.test-data/image-approval-check.png')});
+ console.log('Passed: image paste/preview/remove/reload/image-only send/failure retention; typed approval forms, string IDs, unsent defaults, concurrent requests and cancellation.');
+}finally{await browser.close();await api('/shutdown',{}).catch(()=>{});child.kill();}

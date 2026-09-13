@@ -1,0 +1,39 @@
+name: Windows preview
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: windows-preview
+  cancel-in-progress: true
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: node test/ui-check.mjs
+      - run: node test/vertical-tabs-e2e.mjs
+      - run: node test/csv-e2e.mjs
+      - name: Build and verify package
+        run: ./scripts/package-preview.ps1
+      - name: Publish preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $releaseZip = Get-ChildItem releases -Recurse -Filter *.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $releaseTag = 'preview-' + $env:GITHUB_RUN_NUMBER + '-' + $env:GITHUB_RUN_ATTEMPT
+          gh release create $releaseTag $releaseZip.FullName ($releaseZip.FullName + '.sha256') --target $env:GITHUB_SHA --title ('Atlas Land ' + $releaseTag) --notes-file docs/release-notes.md --prerelease
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+

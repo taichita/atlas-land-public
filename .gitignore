@@ -1,0 +1,15 @@
+node_modules/
+.schema/
+.native/
+.test-data/
+dist/
+dist-next/
+dist*/
+playground/
+.env*
+*.bak
+*.tmp
+auth.json
+workspace.json
+releases/
+*.log

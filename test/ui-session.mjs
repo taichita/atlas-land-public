@@ -1,0 +1,20 @@
+// Isolated UI fixture: no user sessions, Codex credentials or model calls.
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {spawn} from 'node:child_process';
+import {createInterface} from 'node:readline';
+const root=path.resolve(process.argv[2]||'.');
+const data=await fs.mkdtemp(path.join(os.tmpdir(),'atlas-ui-'));
+const note=path.join(data,'review.md');
+await fs.copyFile(path.resolve('test/fixtures/pane-review.md'),note);
+const paths=[note,path.resolve('test/fixtures/preview.html'),path.resolve('test/media-fixture.html')];
+if(process.argv[3])paths.push(path.resolve(process.argv[3]));
+const views=paths.map(p=>({key:'localfile:'+p,kind:'localfile',id:p,path:p}));
+await fs.writeFile(path.join(data,'workspace.json'),JSON.stringify({tasks:[],tabs:[],links:[],ui:{viewTabs:views,activeView:views[0].key,rightPane:views[1],appearanceVersion:3,bodySize:16}}));
+const child=spawn(process.execPath,[path.join(root,'server/main.mjs')],{cwd:root,windowsHide:true,env:{...process.env,AI_WORKSPACE_CODEX:process.execPath,AI_WORKSPACE_DATA:data,LOCALAPPDATA:data,CODEX_HOME:path.join(data,'codex'),GPT_ATLAS_DESKTOP_SYNC:'0'},stdio:['ignore','pipe','pipe']});
+child.stderr.on('data',()=>{});
+createInterface({input:child.stdout}).once('line',line=>console.log(JSON.stringify({...JSON.parse(line),data,note})));
+child.on('exit',()=>process.exit(0));
+process.on('SIGTERM',()=>child.kill());
+setTimeout(()=>child.kill(),20*60*1000).unref();

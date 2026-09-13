@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>Atlas shortcut check</title>
+<style>body{font:20px system-ui;background:#f7efff;color:#291744;padding:20px}video{width:160px;height:90px;background:#392257}input{font:inherit}iframe{height:220px;width:100%;border:2px solid #8353cc}button{font:inherit}</style>
+<h1>Atlas shortcut check</h1>
+<button id="focus">Focus videos</button><button id="add">Add video</button>
+<p><label>Typing test <input id="typing"></label></p>
+<video controls></video><video controls></video><p id="rates"></p>
+<script>
+const report=()=>document.getElementById('rates').textContent='Rates: '+[...document.querySelectorAll('video')].map(v=>v.playbackRate.toFixed(2)).join(' / ');
+document.addEventListener('ratechange', report, true);report();
+document.getElementById('add').onclick=()=>{document.body.appendChild(document.createElement('video'));report()};
+if(!location.search) { const iframe=document.createElement('iframe');iframe.src=location.pathname+'?frame';document.body.appendChild(iframe); }
+</script>
