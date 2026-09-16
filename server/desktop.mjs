@@ -1,9 +1,7 @@
 import net from "node:net";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import fs from 'node:fs/promises';
 import crypto from "node:crypto";
 
-const exec = promisify(execFile);
 const required = ["list_threads", "read_thread", "wait_threads", "send_message_to_thread"];
 const allowed = new Set([...required,"navigate_to_codex_page"]);
 const maxFrame = 8 * 1024 * 1024;
@@ -13,7 +11,7 @@ const maxFrame = 8 * 1024 * 1024;
 // interrupted, or forked by this adapter. Never retry a dispatched mutation.
 export class DesktopBridge {
   constructor({ discover } = {}) {
-    this.discover = discover || discoverPipe;
+    this.discover = discover || discoverPipes;
     this.pending = new Map();
     this.seq = 0;
     this.buffer = Buffer.alloc(0);
@@ -25,7 +23,10 @@ export class DesktopBridge {
     if (this.connecting) return this.connecting;
     if (this.closed) throw new Error("接続を終了しました");
     this.connecting = (async () => {
-      const address = await this.discover();
+      const discovered = await this.discover(), addresses=Array.isArray(discovered)?discovered:[discovered];
+      let lastError;
+      for(const address of addresses){
+      try{
       await new Promise((resolve, reject) => {
         const socket = net.createConnection(address);
         const timer = setTimeout(() => socket.destroy(new Error("Codexアプリへの接続がタイムアウトしました")), 4000);
@@ -40,9 +41,13 @@ export class DesktopBridge {
         socket.on("error", (e) => { if (this.socket === socket) this.fail(e); });
         socket.on("close", () => { clearTimeout(timer); if (this.socket === socket) this.fail(new Error("Codexアプリとの接続が切れました")); });
       });
-      const catalog = await this.request("tools/list", { threadStartKind: "all" });
+      const catalog = await this.request("tools/list", { threadStartKind: "all" },4000);
       this.tools = new Map(catalog.tools.filter((t) => allowed.has(t.name)).map((t) => [t.name, t]));
       if (required.some(name=>!this.tools.has(name))) throw new Error("このCodexアプリの接続仕様に対応していません");
+      return;
+      }catch(e){lastError=e;this.socket?.destroy();this.socket=null;this.tools.clear();}
+      }
+      throw lastError||new Error('Codexアプリの接続先が見つかりません。Codexを起動してください');
     })().catch(e => { this.socket?.destroy(); this.tools.clear(); throw e; }).finally(() => { this.connecting = null; });
     return this.connecting;
   }
@@ -56,7 +61,10 @@ export class DesktopBridge {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error("Codexからの応答を確認できませんでした。会話を更新して確認してください"));
+        const error=new Error("Codexからの応答を確認できませんでした。会話を更新して確認してください");
+        reject(error);
+        // Force fresh discovery after a stale connection; never resend this request.
+        this.socket?.destroy();
       }, timeout);
       this.pending.set(id, { resolve, reject, timer });
       this.socket.write(Buffer.concat([header, payload]));
@@ -103,11 +111,10 @@ export class DesktopBridge {
   close() { this.closed = true; this.socket?.destroy(); this.fail(new Error("接続を終了しました")); }
 }
 
-async function discoverPipe() {
+export async function discoverPipes({env=process.env,readDirectory=fs.readdir}={}) {
   if (process.platform !== "win32") throw new Error("Codexアプリとの同期はWindowsで利用できます");
-  const command = "Get-CimInstance Win32_Process -Filter \"Name='codex.exe'\" | Where-Object { $_.CommandLine -match 'app-server' -and $_.CommandLine -match 'CODEX_APP_TOOLS_PIPE_PATH' } | ForEach-Object { if ($_.CommandLine -match 'codex-browser-use-[0-9a-f-]{36}') { $Matches[0] } } | Select-Object -First 1";
-  const { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { windowsHide: true, timeout: 8000 });
-  const name = stdout.trim();
-  if (!/^codex-browser-use-[0-9a-f-]{36}$/.test(name)) throw new Error("Codexアプリを開くと、そちらの会話と同期します");
-  return "\\\\.\\pipe\\" + name;
+  const prefix='\\\\.\\pipe\\',valid=/^codex-browser-use(?:-|\\)[0-9a-f-]{36}$/i;
+  const preferred=env.CODEX_APP_TOOLS_PIPE_PATH;
+  const names=await readDirectory(prefix).catch(()=>[]);
+  return [...new Set([...(preferred?.startsWith(prefix)&&valid.test(preferred.slice(prefix.length))?[preferred]:[]),...names.filter(n=>valid.test(n)).map(n=>prefix+n)])].slice(0,16);
 }

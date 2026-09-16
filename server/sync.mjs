@@ -19,9 +19,19 @@ export function runtimeState(status, turn) {
   return "unknown";
 }
 
+export async function releaseLocalTask(t,{sending,loaded,bridge,update}) {
+  if(t.external)return true;
+  if(sending.has(t.id)||t.activeTurn||t.queue||['running','starting','waiting'].includes(t.state))return false;
+  sending.add(t.id);
+  try {
+    if(loaded.has(t.id)){await bridge.call('thread/unsubscribe',{threadId:t.id});loaded.delete(t.id);}
+    t.external=true;t.source='desktop';t.syncedAt=0;update(t);return true;
+  } finally {sending.delete(t.id);}
+}
+
 export class DesktopSync {
-  constructor({ store, bridge, connect, update, emit, cleanItem, desktop = new DesktopBridge() }) {
-    Object.assign(this, { store, bridge, connect, update, emit, cleanItem, desktop });
+  constructor({ store, bridge, connect, update, emit, cleanItem, releaseLocal, desktop = new DesktopBridge() }) {
+    Object.assign(this, { store, bridge, connect, update, emit, cleanItem, releaseLocal, desktop });
     this.cursors = new Map(); this.signatures = new Map(); this.taskSignatures = new Map(); this.loadedHistory = new Map();
     this.contextPending = null; this.busy = false; this.lastList = 0; this.active = null;
     this.enabled = process.env.GPT_ATLAS_DESKTOP_SYNC !== "0";
@@ -70,7 +80,11 @@ export class DesktopSync {
         for (const entry of entries) {
           if (entry.kind !== "codex" || (entry.hostId && entry.hostId !== "local") || entry.id === this.store.data.desktopContextId || !entry.cwd) continue;
           let t = this.store.data.tasks.find(t => t.id === entry.id);
-          if (t && !t.external) continue;
+          if(t&&!t.external){
+            if(!t.hasConversation||t.activeTurn||t.queue||!this.releaseLocal)continue;
+            // Only release an idle local executor. Desktop then owns all future turns.
+            try{if(!await this.releaseLocal(t))continue;}catch(e){this.readFailed(t,e);continue;}
+          }
           const fresh = !t;
           if (!t) t = this.store.addThread({ ...entry, name: entry.title }, { external: true, source: "desktop", hasConversation: false, state: "unknown" });
           const changed = !t.syncedAt || entry.updatedAt * 1000 > (t.sourceUpdatedAt || 0);
@@ -80,7 +94,7 @@ export class DesktopSync {
           if (entry.status?.type === "active") t.state = runtimeState(entry.status);
           if (changed || fresh) {
             try { await this.read(t, { initial: fresh }); }
-            catch (e) { if (!t.hasConversation) { t.syncError = e.message; t.sourceUpdatedAt = 0; } else throw e; }
+            catch (e) { this.readFailed(t,e); }
           }
         }
       }
@@ -94,8 +108,9 @@ export class DesktopSync {
           const before = t.state;
           t.state = runtimeState(poll.thread.status, poll.latestTurn);
           t.activeTurn = poll.latestTurn?.status === "inProgress" ? poll.latestTurn.id : null;
-          if (poll.changed || before !== t.state || t.state === "running") await this.read(t);
-          else if (t.id === this.active && Date.now() - (t.syncedAt || 0) > 6000) await this.read(t);
+          if (poll.changed || before !== t.state || t.state === "running" || t.id===this.active&&Date.now()-(t.syncedAt||0)>6000){
+            try{await this.read(t);}catch(e){this.readFailed(t,e);}
+          }
         }
       }
       this.available = true; this.lastError = "";
@@ -109,6 +124,7 @@ export class DesktopSync {
       this.busy = false;
     }
   }
+  readFailed(t,e){const changed=t.syncError!==e.message;t.syncError=e.message;t.sourceUpdatedAt=0;if(changed)this.update(t);}
   async read(t, { initial = false, cursor } = {}) {
     await this.connect();
     // Desktop summaries can omit message items in paginated conversations.
@@ -143,9 +159,10 @@ export class DesktopSync {
     t.activeTurn = ["running", "waiting"].includes(t.state) ? liveLast?.id || null : null;
     t.lastReplyAt = (r.thread?.updatedAt || last?.completedAt || last?.startedAt) * 1000 || t.lastReplyAt;
     t.syncedAt = Date.now();
+    const hadError=!!t.syncError;t.syncError=null;
     t.source = "desktop";
     const taskSignature = JSON.stringify([t.title, t.cwd, t.state, t.activeTurn, t.hasConversation, t.lastReplyAt, t.source]);
-    if (changed || this.taskSignatures.get(t.id) !== taskSignature) this.update(t);
+    if (changed || hadError || this.taskSignatures.get(t.id) !== taskSignature) this.update(t);
     this.taskSignatures.set(t.id, taskSignature);
     return result;
   }

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { CodexBridge } from "./codex.mjs";
 import { StateStore } from "./state.mjs";
 import {defaultPolicy,policyFor,policyHash,policyUpdate} from './agent-policy.mjs';
-import { DesktopSync, desktopMessage } from "./sync.mjs";
+import { DesktopSync, desktopMessage, releaseLocalTask } from "./sync.mjs";
 import { codexUsage, claudeUsage, enableClaudeUsage } from "./usage.mjs";
 import {
   readFile,
@@ -99,9 +99,10 @@ function update(t) {
   store.save();
   emit("task", t);
 }
-const desktopSync = new DesktopSync({ store, bridge, connect, update, emit, cleanItem: publicItem });
-desktopSync.start();
 const sending = new Set();
+const releaseLocal=t=>releaseLocalTask(t,{sending,loaded,bridge,update});
+const desktopSync = new DesktopSync({ store, bridge, connect, update, emit, cleanItem: publicItem, releaseLocal });
+desktopSync.start();
 const savingNotes=new Set();
 function fileLink(t, file, kind = "file", source = "observed") {
   const absolute = path.resolve(t.cwd, file);
@@ -154,7 +155,7 @@ bridge.on("disconnected", () => {
   connected = false;
   loaded.clear();
   for (const t of store.data.tasks) {
-    if (["running", "waiting", "starting"].includes(t.state)) {
+    if (!t.external && ["running", "waiting", "starting"].includes(t.state)) {
       t.state = "disconnected";
       t.activeTurn = null;
       store.event(t, "error", "Codexとの接続が切れました");
@@ -189,7 +190,7 @@ bridge.on("notification", (m) => {
     codexLimits = next;
     emit("usage", codexLimits);
   }
-  if (!t) return;
+  if (!t || t.external) return;
   t.lastEventAt = Date.now();
   switch (m.method) {
     case "turn/started":
@@ -1131,7 +1132,10 @@ const server = http.createServer(async (req, res) => {
           return json(res, child);
         }
         if(action==='open-source'&&req.method==='POST'){
-          if(!t.external)fail('Atlasで実行中の案件です');
+          if(!t.external){
+            await desktopSync.call('read_thread',{threadId:t.id,hostId:'local',turnLimit:1,includeOutputs:false});
+            if(!await releaseLocal(t))fail('現在のAI作業が終わるとCodex側でも開けます',409);
+          }
           return json(res,await desktopSync.call('navigate_to_codex_page',{threadId:t.id}));
         }
         if (action === "send" && req.method === "POST") {

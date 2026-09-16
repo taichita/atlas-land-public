@@ -560,6 +560,8 @@ function renderActive() {
     ? `<i class="dot ${esc(t.state)}"></i>${esc(status(t))}`
     : "";
   $("inspect-task").hidden = !t;
+  $('open-codex').hidden=!t||!hasConversation(t);
+  $('open-codex').disabled=!!t&&!t.external&&!!t.activeTurn;
   $("store-task").hidden = !t || !hasConversation(t);
   $("store-task").textContent = t?.stored ? "保管から戻す" : "保管する";
   $("composer").hidden = !t;
@@ -686,7 +688,7 @@ function renderConversation() {
   let html = "";
   if (t.external)
     html =
-      `<div class="conversation-sync"><span title="${esc(state.desktop?.error || "Codexアプリと同期")}">${state.desktop?.error ? "⇄ Codex · 接続を確認" : "⇄ Codex"}</span><button id="refresh-conversation" title="会話を更新">↻</button></div>`;
+      `<div class="conversation-sync"><span title="${esc(t.syncError || state.desktop?.error || "Codexアプリと同期")}">${t.syncError || state.desktop?.error ? "⇄ Codex · 接続を確認" : "⇄ Codex"}</span><button id="refresh-conversation" title="会話を更新">↻</button></div>`;
   if (!history) html += '<div class="empty">会話を読み込んでいます…</div>';
   else {
     if (history.cursor)
@@ -2241,6 +2243,7 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
   runShortcut(command).catch((error) => toast(error.message));
 }, true);
+action('open-codex',()=>api('/tasks/'+state.active+'/open-source',{}));
 if (native)
   paneBridge.addEventListener("message", (e) => {
     const m = e.data;
@@ -2261,7 +2264,11 @@ if (native)
       }
       return;
     }
-    if (m.type === "app.closing") {
+    if(m.type==='app.resumed'){
+      api('/connect',{}).catch(()=>{});
+      api('/sync',{active:state.active}).then(r=>{r.tasks.forEach(upsert);renderSidebar();renderActive();if(state.active)return loadHistory(state.active);}).catch(e=>toast(e.message));return;
+    }
+    if (m.type === "app.closing" || m.type==='app.saving') {
       stashDraft();
       clearTimeout(prefs.timer);
       clearTimeout(draftTimer);
@@ -2278,7 +2285,7 @@ if (native)
           activeView: state.activeView,
         }),
       ]))
-        .then(() => postHost("app.exit"))
+        .then(() => {if(m.type==='app.closing')postHost("app.exit");})
         .catch((e) =>
           toast("下書きを保存できないため終了を止めました: " + e.message),
         );

@@ -9,10 +9,13 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
+using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
 class Workspace : Form {
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern int RegisterApplicationRestart(string commandLine,uint flags);
  static readonly object lifecycleLock=new object();
  static void Lifecycle(string detail){try{lock(lifecycleLock){Directory.CreateDirectory(profile);string file=Path.Combine(profile,"lifecycle.log");if(File.Exists(file)&&new FileInfo(file).Length>2097152){File.Copy(file,file+".previous",true);File.WriteAllText(file,"");}File.AppendAllText(file,DateTimeOffset.Now.ToString("o")+" pid="+Process.GetCurrentProcess().Id+" "+detail+Environment.NewLine);}}catch{}}
  readonly JavaScriptSerializer json=new JavaScriptSerializer { MaxJsonLength=4000000 };
@@ -28,6 +31,12 @@ class Workspace : Form {
  readonly Stopwatch startupClock=Stopwatch.StartNew(); WebView2 ui; CoreWebView2Environment browsing; string activePage; Rectangle pageBounds; readonly Dictionary<string,Rectangle> browserBounds=new Dictionary<string,Rectangle>(); bool browserVisible=false,exiting=false; int running=0; NotifyIcon tray;
  [STAThread] static void Main(){bool created;using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AtlasLandNewWindow"+InstanceSuffix()))using(var mutex=new Mutex(true,"Local\\PersonalAIWorkspaceDesktop"+InstanceSuffix(),out created)){
   if(!created){signal.Set();return;}Lifecycle("app.start");Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
+  if(Environment.GetEnvironmentVariable("ATLAS_PROFILE")==null)Lifecycle("restart.registration result="+RegisterApplicationRestart("--restore",0));
+  Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+  Application.ThreadException+=(s,e)=>Lifecycle("ui.exception "+e.Exception.GetType().FullName+" "+e.Exception.Message);
+  AppDomain.CurrentDomain.UnhandledException+=(s,e)=>Lifecycle("process.exception terminating="+e.IsTerminating+" "+e.ExceptionObject.GetType().FullName);
+  AppDomain.CurrentDomain.ProcessExit+=(s,e)=>Lifecycle("process.exit");
+  SystemEvents.PowerModeChanged+=(s,e)=>{Lifecycle("power."+e.Mode);if(e.Mode==PowerModes.Resume&&session!=null)session.Wake();};
   session=new Session();var wait=ThreadPool.RegisterWaitForSingleObject(signal,(s,t)=>session.DispatchNew(),null,Timeout.Infinite,false);
   Application.Run(session);wait.Unregister(null);Lifecycle("app.message-loop-ended");
  }}
@@ -47,21 +56,30 @@ class Workspace : Form {
   var ready=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line);string url=Convert.ToString(ready["url"]);var uri=new Uri(url);origin=uri.GetLeftPart(UriPartial.Authority);token=uri.Fragment.TrimStart('#');return url;
  }
  async Task Boot(){try{
-  if(serviceReady==null)serviceReady=StartService();await serviceReady;if(IsDisposed)return;
+  if(serviceReady==null||serviceReady.IsFaulted&&(backend==null||backend.HasExited))serviceReady=StartService();await serviceReady;if(IsDisposed)return;
   string url=origin+"/?window="+Uri.EscapeDataString(windowId)+"#"+token;
   ui=new WebView2{Dock=DockStyle.Fill,DefaultBackgroundColor=BackColor};Controls.Clear();Controls.Add(ui);
   var env=await CoreWebView2Environment.CreateAsync(null,Path.Combine(profile,"webview","shared"));browsing=env;var uiOptions=env.CreateCoreWebView2ControllerOptions();uiOptions.ProfileName="Workspace";await ui.EnsureCoreWebView2Async(env,uiOptions);
+  env.BrowserProcessExited+=(s,e)=>{if(e.BrowserProcessExitKind==CoreWebView2BrowserProcessExitKind.Failed&&!exiting&&!IsDisposed)session.RecoverViews(e.BrowserProcessId);};
   ui.CoreWebView2.Settings.AreDevToolsEnabled=true;ui.CoreWebView2.Settings.AreDefaultContextMenusEnabled=false;ui.CoreWebView2.Settings.IsStatusBarEnabled=false;
   ui.CoreWebView2.NavigationStarting+=(s,e)=>{Uri dest;if(!Uri.TryCreate(e.Uri,UriKind.Absolute,out dest)||dest.GetLeftPart(UriPartial.Authority)!=origin||dest.AbsolutePath!="/"){e.Cancel=true;if(IsWeb(e.Uri))Post(new{type="openUrl",url=e.Uri});}};
   ui.CoreWebView2.NewWindowRequested+=(s,e)=>{e.Handled=true;if(IsWeb(e.Uri))Post(new{type="openUrl",url=e.Uri});};
-  ui.CoreWebView2.ProcessFailed+=(s,e)=>Lifecycle("ui.process-failed "+e.ProcessFailedKind);
-  ui.CoreWebView2.NavigationCompleted+=(s,e)=>{if(startupClock.IsRunning){startupClock.Stop();Lifecycle("ui.navigation-completed success="+e.IsSuccess+" readyMs="+startupClock.ElapsedMilliseconds);try{File.WriteAllText(Path.Combine(profile,"startup.json"),json.Serialize(new{readyMs=startupClock.ElapsedMilliseconds,pid=Process.GetCurrentProcess().Id,webViewVersion=env.BrowserVersionString,at=DateTime.UtcNow.ToString("o")}));}catch{}}};
+  ui.CoreWebView2.ProcessFailed+=(s,e)=>{Lifecycle("ui.process-failed "+e.ProcessFailedKind);if(e.ProcessFailedKind==CoreWebView2ProcessFailedKind.RenderProcessExited&&!exiting)BeginInvoke(new Action(()=>{try{ui.CoreWebView2.Reload();}catch(Exception error){ShowRecovery(error.Message);}}));};
+  ui.CoreWebView2.NavigationCompleted+=(s,e)=>{Lifecycle("ui.navigation-completed success="+e.IsSuccess);if(startupClock.IsRunning){startupClock.Stop();try{File.WriteAllText(Path.Combine(profile,"startup.json"),json.Serialize(new{readyMs=startupClock.ElapsedMilliseconds,pid=Process.GetCurrentProcess().Id,webViewVersion=env.BrowserVersionString,at=DateTime.UtcNow.ToString("o")}));}catch{}}};
   await ui.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(File.ReadAllText(Path.Combine(appDir,"native","media-shortcuts.js")));
   ui.CoreWebView2.DOMContentLoaded+=(s,e)=>MediaSettings(ui);
   BindShortcuts(ui,null);ui.CoreWebView2.WebMessageReceived+=Message;ui.Source=new Uri(url);
- }catch(Exception e){Lifecycle("boot.failed "+e.GetType().FullName);MessageBox.Show(e.Message,"Atlas Land を起動できませんでした");exiting=true;Close();}}
+ }catch(Exception e){Lifecycle("boot.failed "+e.GetType().FullName);ShowRecovery(e.Message);}}
+ void ShowRecovery(string message){
+  if(IsDisposed||exiting)return;HidePages();Controls.Clear();
+  var panel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,Padding=new Padding(36)};
+  panel.Controls.Add(new Label{Text="Atlas の画面を復元できます",AutoSize=true,Font=new Font("Yu Gothic",16)});
+  panel.Controls.Add(new Label{Text=message,AutoSize=true,MaximumSize=new Size(750,0)});
+  var retry=new Button{Text="画面を復元",AutoSize=true};retry.Click+=async(s,e)=>{retry.Enabled=false;await RebuildViews();};panel.Controls.Add(retry);Controls.Add(panel);
+ }
+ async Task RebuildViews(){if(IsDisposed||exiting)return;uiReady=false;foreach(var p in pages.Values)p.Dispose();pages.Clear();browserBounds.Clear();if(ui!=null){ui.Dispose();ui=null;}browsing=null;await Boot();}
  bool IsWeb(string value){Uri u;return Uri.TryCreate(value,UriKind.Absolute,out u)&&(u.Scheme=="https"||u.Scheme=="http");}
- void Post(object data){if(ui!=null&&ui.CoreWebView2!=null&&!IsDisposed)ui.CoreWebView2.PostWebMessageAsJson(json.Serialize(data));}
+ void Post(object data){try{if(ui!=null&&ui.CoreWebView2!=null&&!IsDisposed)ui.CoreWebView2.PostWebMessageAsJson(json.Serialize(data));}catch(Exception e){Lifecycle("ui.post-failed "+e.GetType().Name);}}
  string Str(Dictionary<string,object> d,string key,string fallback=""){return d.ContainsKey(key)?Convert.ToString(d[key]):fallback;}
  int Num(Dictionary<string,object>d,string k){return d.ContainsKey(k)?Convert.ToInt32(d[k]):0;}
  void DefaultShortcuts(){string[,] values={{"Ctrl+T","new-tab"},{"Ctrl+W","close-tab"},{"Ctrl+Shift+T","reopen-tab"},{"Ctrl+Tab","next-tab"},{"Ctrl+Shift+Tab","previous-tab"},{"Ctrl+PageUp","previous-tab-page"},{"Ctrl+PageDown","next-tab-page"},{"Ctrl+Shift+PageUp","move-tab-left"},{"Ctrl+Shift+PageDown","move-tab-right"},{"Ctrl+L","address"},{"Ctrl+Backslash","split"},{"Ctrl+Alt+ArrowLeft","focus-left"},{"Ctrl+Alt+ArrowRight","focus-right"},{"Ctrl+Shift+N","new-task"},{"Ctrl+Enter","send"},{"Ctrl+Shift+B","sidebar"},{"F1","shortcuts"}};for(int i=0;i<values.GetLength(0);i++)shortcutCommands[values[i,0]]=values[i,1];for(int i=1;i<=9;i++)shortcutCommands["Ctrl+"+i]="tab-"+i;}
@@ -145,7 +163,7 @@ class Workspace : Form {
   Action state=()=>Post(new{type="browser.state",id=id,url=page.CoreWebView2.Source,title=page.CoreWebView2.DocumentTitle,back=page.CoreWebView2.CanGoBack,forward=page.CoreWebView2.CanGoForward});
   page.CoreWebView2.DocumentTitleChanged+=(s,e)=>state();page.CoreWebView2.SourceChanged+=(s,e)=>state();page.CoreWebView2.HistoryChanged+=(s,e)=>state();page.CoreWebView2.NavigationCompleted+=(s,e)=>{state();if(!e.IsSuccess)Post(new{type="browser.error",id=id,error="ページを読み込めませんでした: "+e.WebErrorStatus.ToString()});};
   page.CoreWebView2.NewWindowRequested+=async(s,e)=>{e.Handled=true;if(!IsWeb(e.Uri))return;using(var defer=e.GetDeferral()){string child=(id.Contains(":")?id.Substring(0,id.IndexOf(":")+1):"")+"web-"+Guid.NewGuid().ToString("N");try{var popup=await GetPage(child);e.NewWindow=popup.CoreWebView2;activePage=child;Post(new{type="browser.created",id=child,url=e.Uri,title="新しいタブ"});LayoutPage();}catch(Exception err){Post(new{type="browser.error",id=id,error=err.Message});}}};
-  page.CoreWebView2.ProcessFailed+=(s,e)=>Post(new{type="browser.error",id=id,error="Webページの処理が終了しました。再読込してください: "+e.ProcessFailedKind});
+  page.CoreWebView2.ProcessFailed+=(s,e)=>{Lifecycle("web.process-failed "+e.ProcessFailedKind);Post(new{type="browser.error",id=id,error="ページの表示が停止しました。再読込で復元できます"});};
   return page;
  }
  void HidePages(){foreach(var p in pages.Values)p.Visible=false;}
@@ -153,6 +171,7 @@ class Workspace : Form {
  void OnClosing(object sender,FormClosingEventArgs e){
   if(disposedViews)return;
   Lifecycle("window.closing id="+windowId+" reason="+e.CloseReason+" exiting="+exiting+" running="+running);
+  if(e.CloseReason==CloseReason.WindowsShutDown){session.SavePosition(this);Post(new{type="app.saving"});exiting=true;}
   if(!exiting&&running>0&&session.Count==1){e.Cancel=true;Hide();tray.Visible=true;return;}
   if(!exiting&&ui!=null&&ui.CoreWebView2!=null){e.Cancel=true;Post(new{type="app.closing"});return;}
   session.SavePosition(this);disposedViews=true;tray.Dispose();foreach(var p in pages.Values)p.Dispose();if(ui!=null)ui.Dispose();
@@ -162,13 +181,21 @@ class Workspace : Form {
  class Session : ApplicationContext {
   readonly List<Workspace> windows=new List<Workspace>(); readonly Control dispatcher=new Control();
   readonly string settingsFile=Path.Combine(profile,"windows.json"); readonly JavaScriptSerializer serializer=new JavaScriptSerializer();
-  WindowSettings settings=new WindowSettings(); bool shuttingDown=false,restoring=true;
+  WindowSettings settings=new WindowSettings(); bool shuttingDown=false,restoring=true,recovering=false;int recoveries=0;uint lastFailedProcess=0;DateTime lastRecovery=DateTime.MinValue;
   public int Count{get{return windows.Count;}}
   public Session(){var handle=dispatcher.Handle;try{if(File.Exists(settingsFile))settings=serializer.Deserialize<WindowSettings>(File.ReadAllText(settingsFile));}catch{settings=new WindowSettings();}
    settings=settings??new WindowSettings();settings.Positions=settings.Positions??new Dictionary<string,Placement>();int count=Math.Max(1,Math.Min(8,settings.Count));
    for(int i=0;i<count;i++)Open();restoring=false;
   }
   public void DispatchNew(){try{if(!shuttingDown&&!dispatcher.IsDisposed)dispatcher.BeginInvoke(new Action(()=>{if(!shuttingDown)Open();}));}catch{}}
+  public void Wake(){try{dispatcher.BeginInvoke(new Action(()=>{foreach(var w in windows){w.Post(new{type="app.resumed"});w.LayoutPage();}}));}catch{}}
+  public void RecoverViews(uint processId){try{dispatcher.BeginInvoke(new Action(async()=>{
+   if(shuttingDown||recovering||lastFailedProcess==processId)return;recovering=true;lastFailedProcess=processId;
+   try{if((DateTime.UtcNow-lastRecovery).TotalMinutes>2)recoveries=0;lastRecovery=DateTime.UtcNow;
+    if(++recoveries>3){foreach(var w in windows)w.ShowRecovery("表示の停止が続いています。復元を押すと再試行します");return;}
+    Lifecycle("webview.recover");await Task.WhenAll(windows.ToArray().Select(w=>w.RebuildViews()));
+   }finally{recovering=false;}
+  }));}catch{}}
   public Workspace Open(){
    int n=1;while(windows.Any(existing=>existing.windowId==(n==1?"main":"window-"+n)))n++;
    var w=new Workspace(n==1?"main":"window-"+n);Placement p;
