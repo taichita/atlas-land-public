@@ -5,6 +5,13 @@ import iconv from "iconv-lite";
 import { createTwoFilesPatch } from "diff";
 
 export const hash = (b) => crypto.createHash("sha256").update(b).digest("hex");
+export const previewExtensions=['html','htm','pdf','png','jpg','jpeg','webp','gif','svg','mp4','m4v','mov','webm','mp3','wav','ogg','m4a','flac'];
+export async function revealTarget(file){
+  const stat=await fs.stat(file),ext=path.extname(file).slice(1).toLowerCase();
+  if(stat.isDirectory())return {revealPath:file,directory:true};
+  if(['exe','msi','msix','msixbundle','zip','7z','rar','tar','gz','iso','dll'].includes(ext)||stat.size>2*1024*1024&&!previewExtensions.includes(ext))return {revealPath:path.dirname(file),directory:false};
+  return null;
+}
 export function fail(message, status = 400) {
   const e = new Error(message);
   e.status = status;

@@ -22,6 +22,7 @@ import { codexUsage, claudeUsage, enableClaudeUsage } from "./usage.mjs";
 import {
   readFile,
   readLocalFile,
+  revealTarget,
   saveFile,
   saveLocalFile,
   listFiles,
@@ -904,6 +905,7 @@ const server = http.createServer(async (req, res) => {
         const note=store.data.notes?.[b.path];if(note?.savedPath)b.path=note.savedPath;
         if(typeof b.path!=='string'||!path.isAbsolute(b.path))fail('ファイルのパスを指定してください');
         const actual=await fs.realpath(b.path), stat=await fs.stat(actual), ext=path.extname(actual).slice(1).toLowerCase();
+        const reveal=await revealTarget(actual);if(reveal)return json(res,{path:actual,...reveal});
         if(!stat.isFile())fail('ファイルを選んでください');
         if(['html','htm','pdf','png','jpg','jpeg','webp','gif','svg','mp4','m4v','mov','webm','mp3','wav','ogg','m4a','flac'].includes(ext)){
           const id=crypto.randomBytes(24).toString('hex');
@@ -1229,6 +1231,7 @@ const server = http.createServer(async (req, res) => {
           });
         if (action === "file" && req.method === "GET") {
           const relative = url.searchParams.get("path");
+          const reveal=await revealTarget(await resolveFile(t.cwd,relative));if(reveal)return json(res,{path:relative,...reveal});
           const f = await readFile(
             t.cwd,
             relative,
@@ -1265,7 +1268,7 @@ const server = http.createServer(async (req, res) => {
           return json(res, f);
         }
         if (action === "preview" && req.method === "POST") {
-          await resolveFile(t.cwd, b.path);
+          const reveal=await revealTarget(await resolveFile(t.cwd,b.path));if(reveal)return json(res,reveal);
           const id = crypto.randomBytes(24).toString("hex");
           previewGrants.set(id, { root: t.cwd, createdAt: Date.now() });
           return json(res, {

@@ -238,7 +238,11 @@ document.addEventListener("click", (e) => {
   else if(!target)toast('このリンクはAtlas内で開けません。Windows上のファイルへのリンクが必要です。');
 });
 function localPath(value){return /^[a-z]:[\\/]/i.test(value)?value:task()?.cwd?task().cwd.replace(/[\\/]$/,'')+'/'+value:value;}
-async function revealLocal(filename){await host('file.reveal',{path:filename});}
+async function revealLocal(filename){
+  if(native)return host('file.reveal',{path:filename});
+  openDialog(dialogHeader('保存場所')+'<input id="folder-path" readonly style="width:100%" value="'+esc(filename.replaceAll('/','\\'))+'"><button id="copy-folder-path">パスをコピー</button>');
+  $('copy-folder-path').onclick=async()=>{await navigator.clipboard.writeText($('folder-path').value);toast('コピーしました');};
+}
 action('reveal-file',()=>{const e=currentEditor();if(e)return revealLocal(e.local?e.path:localPath(e.path));});
 function renderSidebar() {
   const q = $("task-search").value.toLowerCase();
@@ -1520,6 +1524,7 @@ async function openFile(relative, encoding) {
     ].includes(ext)
   ) {
     const p = await api("/tasks/" + id + "/preview", { path: relative });
+    if(p.revealPath)return revealLocal(p.revealPath);
     fs.editor = { path: relative, preview: p.url, ext, mode: "read" };
     show();
     return;
@@ -1532,6 +1537,7 @@ async function openFile(relative, encoding) {
         encodeURIComponent(relative) +
         (encoding ? "&encoding=" + encoding : ""),
     );
+    if(f.revealPath)return revealLocal(f.revealPath);
     fs.editor = { ...f, original: f.text, mode: "read", dirty: false, ext };
     show();
   } catch (e) {
@@ -1598,6 +1604,7 @@ async function loadLocalPath(selected, encoding) {
   if(state.localEditors[selected]&&!encoding){show(state.localEditors[selected]);return;}
   try {
     const f = await api('/local/open',{path:selected,encoding});
+    if(f.revealPath)return revealLocal(f.revealPath);
     const draft = f.preview ? null : await api('/local/draft?path='+encodeURIComponent(selected));
     show(draft ? {...draft,path:f.path,local:true,dirty:true,untitled:f.untitled} : {...f,original:f.text,mode:f.untitled?'edit':'read',dirty:false,local:true});
   } catch (e) {

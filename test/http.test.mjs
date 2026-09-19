@@ -96,6 +96,12 @@ test("local HTTP service persists drafts, streams media ranges and isolates prev
     assert.equal(localSaved.changed, true);
     assert.equal(await fs.readFile(localFile, "utf8"), "# Atlasで編集\n");
     const large=path.join(dir,'large.mp4');
+    const installer=path.join(cwd,'setup.exe');const binary=await fs.open(installer,'w');await binary.truncate(54*1024*1024);await binary.close();
+    for(const target of [cwd,installer]){const opened=await(await api('/local/open',{path:target})).json();assert.equal(opened.revealPath,cwd);assert.equal(opened.text,undefined);}
+    assert.equal((await(await api('/tasks/http-test/file?path=setup.exe')).json()).revealPath,cwd);
+    assert.equal((await(await api('/tasks/http-test/file?path=')).json()).revealPath,cwd);
+    const pdfFolder=path.join(cwd,'folder.pdf');await fs.mkdir(pdfFolder);
+    assert.equal((await(await api('/tasks/http-test/preview',{path:'folder.pdf'})).json()).revealPath,pdfFolder);
     const handle=await fs.open(large,'w');await handle.truncate(300*1024*1024);await handle.close();
     const media=await(await api('/local/open',{path:large})).json();
     assert.equal(media.bytes,300*1024*1024);assert(media.preview);assert.equal(media.text,undefined);
