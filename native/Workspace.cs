@@ -49,10 +49,11 @@ class Workspace : Form {
  void Restore(){Show();WindowState=FormWindowState.Normal;Activate();tray.Visible=false;LayoutPage();}
  static async Task<string> StartService(){
   Directory.CreateDirectory(profile);
-  string node=Environment.GetEnvironmentVariable("AI_WORKSPACE_NODE");if(String.IsNullOrEmpty(node))node=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"nodejs","node.exe");if(!File.Exists(node))throw new Exception("Node.js が見つかりません。AI_WORKSPACE_NODE を設定してください。");
+  string node=Environment.GetEnvironmentVariable("AI_WORKSPACE_NODE");if(String.IsNullOrEmpty(node)){node=Path.Combine(appDir,"runtime","node.exe");if(!File.Exists(node))node=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"nodejs","node.exe");}if(!File.Exists(node))throw new Exception("Node.js が見つかりません。セットアップを再実行してください。");
   var info=new ProcessStartInfo(node,"\""+Path.Combine(appDir,"server","main.mjs")+"\""){WorkingDirectory=appDir,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
   info.EnvironmentVariables["ATLAS_FRESH_SESSION"]=Environment.GetCommandLineArgs().Contains("--restore")?"0":"1";
-  if(Environment.GetEnvironmentVariable("ATLAS_PROFILE")==null)info.EnvironmentVariables["ATLAS_CHROME_SYNC"]="1";
+  if(Environment.GetEnvironmentVariable("AI_WORKSPACE_DATA")==null)info.EnvironmentVariables["AI_WORKSPACE_DATA"]=Path.Combine(profile,"data");
+  if(Environment.GetEnvironmentVariable("ATLAS_PROFILE")==null&&!File.Exists(Path.Combine(appDir,"installation.json")))info.EnvironmentVariables["ATLAS_CHROME_SYNC"]="1";
   backend=Process.Start(info);var startedBackend=backend;Lifecycle("backend.start pid="+startedBackend.Id);startedBackend.Exited+=(s,e)=>{try{Lifecycle("backend.exit pid="+startedBackend.Id+" code="+startedBackend.ExitCode);}catch{}};startedBackend.EnableRaisingEvents=true;backend.ErrorDataReceived+=(s,e)=>{if(!String.IsNullOrEmpty(e.Data))try{File.AppendAllText(Path.Combine(profile,"host-errors.log"),DateTime.Now.ToString("s")+" "+e.Data+Environment.NewLine);}catch{}};backend.BeginErrorReadLine();
   var lineTask=backend.StandardOutput.ReadLineAsync();if(await Task.WhenAny(lineTask,Task.Delay(20000))!=lineTask)throw new Exception("バックエンドの起動がタイムアウトしました");string line=await lineTask;if(String.IsNullOrEmpty(line))throw new Exception("バックエンドを起動できませんでした。host-errors.log を確認してください。");
   var ready=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line);string url=Convert.ToString(ready["url"]);var uri=new Uri(url);origin=uri.GetLeftPart(UriPartial.Authority);token=uri.Fragment.TrimStart('#');return url;

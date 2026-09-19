@@ -30,7 +30,7 @@ export class CodexBridge extends EventEmitter {
     super();
     this.pending = new Map();
     this.seq = 0;
-    this.exe = findCodex();
+    this.exe = null;
     this.starting = null;
     this.proc = null;
     this.lastError = "";
@@ -46,6 +46,7 @@ export class CodexBridge extends EventEmitter {
     }
   }
   async start() {
+    this.exe = findCodex();
     this.proc = spawn(this.exe, ["app-server"], {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],

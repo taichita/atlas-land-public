@@ -1,4 +1,4 @@
-param([string]$BuildDirectory='dist-package')
+param([string]$BuildDirectory='dist-package',[switch]$StageOnly)
 $ErrorActionPreference='Stop'
 $taskRoot=Split-Path -Parent $PSScriptRoot
 & (Join-Path $PSScriptRoot 'build-native.ps1') -OutputDirectory $BuildDirectory
@@ -48,6 +48,7 @@ $taskManifest=Get-ChildItem -LiteralPath $taskStage -File -Recurse | ForEach-Obj
 [ordered]@{version=$taskVersion;builtAt=(Get-Date).ToUniversalTime().ToString('o');files=@($taskManifest)} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $taskStage 'manifest.json') -Encoding UTF8
 & node (Join-Path $PSScriptRoot 'verify-package.mjs') $taskStage
 if($LASTEXITCODE -ne 0){throw 'Package verification failed'}
+if($StageOnly){Write-Output $taskStage;return}
 $taskZip=Join-Path $taskRelease "Atlas-Browser-preview-$taskVersion-win-x64.zip"
 Compress-Archive -LiteralPath $taskStage -DestinationPath $taskZip -CompressionLevel Optimal
 (Get-FileHash -LiteralPath $taskZip -Algorithm SHA256).Hash.ToLower() | Set-Content -LiteralPath ($taskZip+'.sha256') -Encoding ASCII

@@ -1,4 +1,5 @@
 import {requestResponse} from '../public/approval-forms.js';
+import {readInstallation,applyInstallation,accessModes} from './installation.mjs';
 import {windowState,freshWorkspace,blankUI} from './windows.mjs';
 import {normalizeTheme} from '../public/theme.js';
 import {noteFolder,createNote,saveNote} from './notes.mjs';
@@ -39,10 +40,12 @@ const dataDir =
   );
 const store = new StateStore(dataDir),
   bridge = new CodexBridge();
+const installation=await readInstallation(path.join(root,'installation.json'));
+if(applyInstallation(store.data,installation))store.flush();
 if(process.env.ATLAS_FRESH_SESSION==='1'){freshWorkspace(store.data);store.flush();}
 const chromeBookmarks=new ChromeBookmarks(store);
 if(store.data.chromeSync===undefined&&process.env.ATLAS_CHROME_SYNC==='1')store.data.chromeSync=true;
-const connections=new Connections(dataDir);
+const connections=new Connections(dataDir,installation?.channel==='internal'?{legacyGroqFile:null}:{});
 const translationDir=path.join(dataDir,'translation');
 await fs.mkdir(translationDir,{recursive:true});
 const pageTranslator=new PageTranslator(bridge,translationDir);
@@ -506,7 +509,7 @@ async function ensureLoaded(t) {
     await bridge.call("thread/resume", {
       threadId: t.id,
       cwd: t.cwd,
-      ...(t.access === "danger-full-access" ? {sandbox: t.access, approvalPolicy: "never"} : {}),
+      ...(accessModes.includes(t.access) ? {sandbox:t.access,approvalPolicy:t.access==='danger-full-access'?'never':'on-request'} : {}),
       excludeTurns: true,
     });
     loaded.add(t.id);
@@ -760,6 +763,7 @@ const server = http.createServer(async (req, res) => {
           requests: requests(),
           sequence,
           defaultFolder:store.data.defaultFolder||defaultFolder,
+          defaultAccess:store.data.defaultAccess||'danger-full-access',
           usage: {
             providers: [codexLimits, await claudeUsage()].filter(Boolean),
           },
@@ -777,6 +781,11 @@ const server = http.createServer(async (req, res) => {
       if(pathname==='/api/default-folder'){
         if(req.method==='POST'){store.data.defaultFolder=await noteFolder(b.folder);store.flush();emit('defaultFolder',{folder:store.data.defaultFolder});}
         return json(res,{folder:store.data.defaultFolder||defaultFolder});
+      }
+      if(pathname==='/api/default-access'){
+        if(req.method!=='POST')fail('Method not allowed',405);
+        if(!accessModes.includes(b.access))fail('権限を選択してください');
+        store.data.defaultAccess=b.access;store.flush();return json(res,{access:b.access});
       }
       if(pathname==='/api/bookmarks'){
         store.data.bookmarks||=[];
@@ -951,7 +960,7 @@ const server = http.createServer(async (req, res) => {
           "danger-full-access",
         ].includes(b.access)
           ? b.access
-          : "danger-full-access";
+          : store.data.defaultAccess || "danger-full-access";
         const r = await bridge.call("thread/start", {
           cwd,
           model: b.model || undefined,
