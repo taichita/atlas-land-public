@@ -5,7 +5,7 @@ import os from 'node:os';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 const root=path.resolve(process.argv[2]||'.');
-const data=await fs.mkdtemp(path.join(os.tmpdir(),'atlas-ui-'));
+const data=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'atlas-ui-')));
 const note=path.join(data,'review.md');
 await fs.copyFile(path.resolve('test/fixtures/pane-review.md'),note);
 const paths=[note,path.resolve('test/fixtures/preview.html'),path.resolve('test/media-fixture.html')];
