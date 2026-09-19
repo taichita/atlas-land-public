@@ -10,6 +10,6 @@ test('policy is sent once per revision; clearing it sends a reset once',()=>{
 });
 test('saved custom rules still receive the current Atlas environment and invalidate the old policy hash',()=>{
  const data={agentPolicy:'custom'},task={agentPolicyHash:policyHash('custom')};
- assert.match(policyUpdate(task,policyFor(data)),/Atlas Land/);assert(policyFor(data).endsWith('custom'));
+ assert.match(policyUpdate(task,policyFor(data)),/Atlas Browser/);assert(policyFor(data).endsWith('custom'));
  task.agentPolicyHash=policyHash(policyFor(data));assert.equal(policyUpdate(task,policyFor(data)),'');
 });

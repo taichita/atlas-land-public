@@ -1,3 +1,6 @@
+import {setupVoice} from './voice-input.js';
+import {tabIcon,svgIcon} from './tab-icons.js';
+import {setupBookmarkFlyout} from './bookmark-flyout.js';
 import {requestHTML,requestKey,readRequestForm} from './requests-ui.js';
 import {setupImagePaste} from './image-paste.js';
 import { marked } from "/vendor/marked.js";
@@ -41,7 +44,7 @@ if (token) {
   history.replaceState(null, "", location.pathname+location.search);
 }
 const native = paneMode ? !!parent.chrome?.webview : !!paneBridge;
-let paneShell, paneVisible = true;
+let paneShell, paneVisible = true, closingWindow=false;
 const editorCache = paneMode ? parent.atlasEditorCache : (window.atlasEditorCache = {files:{},local:{},drafts:{}});
 const state = {
   tasks: [],
@@ -136,7 +139,7 @@ function host(action, args = {}) {
   if (!native)
     return Promise.reject(
       new Error(
-        "この操作はWindowsアプリ内で使えます。dist/AtlasLand.exe を開いてください。",
+        "この操作はWindowsアプリ内で使えます。dist/AtlasBrowser.exe を開いてください。",
       ),
     );
   return new Promise((resolve, reject) => {
@@ -159,6 +162,7 @@ function upsert(t) {
 }
 function preferenceSnapshot(){return {...state.ui,active:state.active,open:state.open,drafts:state.drafts,layout:state.layout,viewTabs:state.viewTabs,activeView:state.activeView};}
 function prefs() {
+  if(closingWindow)return;
   if(paneMode){paneShell?.persist();return;}
   clearTimeout(prefs.timer);
   prefs.timer = setTimeout(
@@ -176,7 +180,7 @@ function prefs() {
   );
 }
 window.addEventListener('pagehide',()=>{
-  if(paneMode||!state.ui)return;
+  if(paneMode||!state.ui||closingWindow)return;
   stashDraft();clearTimeout(prefs.timer);
   api('/preferences',preferenceSnapshot(),true).catch(()=>{});
 });
@@ -246,7 +250,7 @@ function renderSidebar() {
       (t.title + " " + t.cwd).toLowerCase().includes(q) &&
       taskLane(t) === state.filter,
   );
-  const card = (t) => `<button class="task-card" data-task="${esc(t.id)}" aria-pressed="${t.id === state.active}"><span class="title">${esc(t.title)}</span><span class="folder" title="${esc(t.cwd)}">⌁ ${esc(t.cwd?.split(/[\\/]/).filter(Boolean).pop() || t.cwd)}</span><span class="state"><i class="dot ${esc(t.state)}"></i>${esc(t.stored ? "保管" : status(t))}${t.unread ? '<span class="pink">● 新着</span>' : ""}${t.external ? '<span class="sync-mark" title="Codexアプリと同期">⇄</span>' : ""}<time>${time(t.lastReplyAt)}</time></span></button>`;
+  const card = (t) => `<div class="task-entry"><button class="task-card" data-task="${esc(t.id)}" aria-pressed="${t.id === state.active}"><span class="title">${esc(t.title)}</span><span class="folder" title="${esc(t.cwd)}">⌁ ${esc(t.cwd?.split(/[\\/]/).filter(Boolean).pop() || t.cwd)}</span><span class="state"><i class="dot ${esc(t.state)}"></i>${esc(t.stored ? "保管" : status(t))}${t.unread ? '<span class="pink">● 新着</span>' : ""}${t.external ? '<span class="sync-mark" title="Codexアプリと同期">⇄</span>' : ""}<time>${time(t.lastReplyAt)}</time></span></button><button class="task-dismiss" data-dismiss="${esc(t.id)}" aria-label="${esc(t.title)}を一覧から片づける" title="一覧から片づける">×</button></div>`;
   let html;
   if (state.ui.grouping === "folder") {
     const folders = new Map();
@@ -259,6 +263,7 @@ function renderSidebar() {
       (q ? "一致する案件がありません" : state.filter === "working" ? "いま作業中の案件はありません" : state.filter === "stored" ? "保管した案件はありません" : "確認する案件はありません") +
       "</div>";
   if (renderSidebar.lastContent !== content) { $("task-list").innerHTML = content; renderSidebar.lastContent = content; }
+  const unread=all.filter(t=>t.unread&&!t.stored);$('sidebar-notification').hidden=!document.body.classList.contains('sidebar-hidden')||!unread.length;$('sidebar-notification').title=unread.length+' 件の新しい返答';
   $("unread-count").textContent = all.filter((t) => t.unread && !t.stored).length
     ? all.filter((t) => t.unread && !t.stored).length + " 新着"
     : "";
@@ -276,6 +281,7 @@ function renderSidebar() {
   document.querySelectorAll("[data-filter]").forEach(b => { b.setAttribute("aria-pressed", b.dataset.filter === state.filter); b.textContent = laneNames[b.dataset.filter] + " " + all.filter(t => taskLane(t) === b.dataset.filter).length; });
 }
 $("task-list").addEventListener("click", (e) => {
+  const dismiss=e.target.closest("[data-dismiss]");if(dismiss){dismissTask(dismiss.dataset.dismiss).catch(e=>toast(e.message));return;}
   const b = e.target.closest("[data-task]");
   if (b) selectTask(b.dataset.task).catch((e) => toast(e.message));
 });
@@ -294,6 +300,10 @@ document.querySelectorAll("[data-filter]").forEach((b) =>
 let viewEpoch = 0;
 $("task-grouping").addEventListener("change", e => { state.ui.grouping = e.target.value; prefs(); renderSidebar(); });
 action("sync-tasks", async () => { const r = await api("/sync", { active: state.active }); r.tasks.forEach(upsert); renderSidebar(); if (state.active) await loadHistory(state.active); if (!r.available && r.error) toast(r.error); });
+async function dismissTask(id){upsert(await api('/tasks/'+id+'/settings',{stored:true}));await closeView('task:'+id);renderSidebar();renderActive();}
+action('sidebar-notification',async()=>{const t=state.tasks.filter(t=>t.unread&&!t.stored).sort((a,b)=>b.lastReplyAt-a.lastReplyAt)[0];if(t)await selectTask(t.id);});
+action('default-folder',async()=>{const folder=await host('chooseFolder',{path:state.defaultFolder});if(folder){state.defaultFolder=(await api('/default-folder',{folder})).folder;renderDefaultFolder();}});
+function renderDefaultFolder(){const folder=state.defaultFolder||'C:\\dev';$('default-folder').title='新しい案件の既定フォルダ: '+folder;}
 action("store-task", async () => { const t = task(); if (!t) return; upsert(await api("/tasks/" + t.id + "/settings", { stored: !t.stored })); renderSidebar(); renderActive(); });
 function addView(kind, id, extra = {}) {
   const key = kind + ":" + id;
@@ -335,7 +345,7 @@ function renderWorkTabs() {
           t?.title ||
           (v.kind === "folder" ? "ファイル" : v.path?.split(/[\\/]/).at(-1)) ||
           "Web";
-        const glyph = { task: "◌", web: "◎", file: "◈", folder: "▱", localfile: "⌂" }[v.kind];
+        const glyph = tabIcon(v,t,esc);
         return `<div draggable="true" data-tab-key="${esc(v.key)}" data-tab-title="${esc(title)}" class="work-tab kind-${v.kind} ${v.key === state.activeView ? "active" : ""}"><button data-view="${esc(v.key)}" aria-label="${esc(title)}" aria-current="${v.key===state.activeView?'page':'false'}" title="${esc(title)}${t?.url?' — '+esc(t.url):''}"><span class="tab-kind">${glyph}</span><span class="tab-title">${t?.unread ? "● " : ""}${esc(title)}</span></button><button class="close" data-close-view="${esc(v.key)}" aria-label="${esc(title)}のタブを閉じる">×</button></div>`;
       })
       .join("") +
@@ -480,7 +490,7 @@ function markSeen() {
     t?.unread &&
     state.mode === "work" &&
     state.activeView === "task:" + t.id &&
-    document.visibilityState === "visible"
+    document.visibilityState === "visible" && paneVisible
   )
     api("/tasks/" + t.id + "/seen", { at: t.lastReplyAt })
       .then(upsert)
@@ -553,13 +563,15 @@ $("model").addEventListener("change", () => {
 });
 $("effort").addEventListener("change", saveModelChoice);
 function renderActive() {
+  $("voice-provider").value=state.ui.voiceByModel?.[task()?.model||"default"]||"auto";
   const t = task();
-  $("task-title").textContent = t?.title || "Atlas Land";
+  $("task-title").textContent = t?.title || "Atlas Browser";
   $("task-folder").textContent = t?.cwd || state.defaultFolder || "C:\\dev";
   $("task-status").innerHTML = t
     ? `<i class="dot ${esc(t.state)}"></i>${esc(status(t))}`
     : "";
   $("inspect-task").hidden = !t;
+  $('reconnect-task').hidden=!t||!(['disconnected','unknown','failed'].includes(t.state)||t.syncError);
   $('open-codex').hidden=!t||!hasConversation(t);
   $('open-codex').disabled=!!t&&!t.external&&!!t.activeTurn;
   $("store-task").hidden = !t || !hasConversation(t);
@@ -696,7 +708,7 @@ function renderConversation() {
     html += conversationHTML(allItems(history));
     if (!allItems(history).length)
       html +=
-        '<div class="welcome"><img class="welcome-icon" src="/assets/gpt-atlas.png" alt=""><h2>新しい案件</h2></div>';
+        '<div class="welcome"><img class="welcome-icon" src="/assets/atlas-browser.png" alt=""><h2>新しい案件</h2></div>';
   }
   if (t.state === "running" || t.state === "starting")
     html += '<div class="busy-label">◌ 作業中</div>';
@@ -933,7 +945,7 @@ action("files-mode", () => {
 });
 action("browser-mode", () => openWeb("https://www.google.com/"));
 action("sidebar-toggle", () => {
-  document.body.classList.toggle("sidebar-hidden");
+  document.body.classList.toggle("sidebar-hidden");state.ui.sidebarHidden=document.body.classList.contains("sidebar-hidden");prefs();renderSidebar();
   syncBrowserLayout();
   state.graph?.resize();
 });
@@ -995,6 +1007,7 @@ async function newTask() {
     upsert(t);
     setLayout("split");
     await selectTask(t.id);
+    expandComposer(true);
     $("prompt").focus();
     return t;
   })();
@@ -1138,6 +1151,20 @@ async function settings() {
   });
 }
 action("settings-button", settings);
+async function showConnections(){
+  $('app-menu').open=false;const c=await api('/connections');
+  openDialog(dialogHeader('AIの接続')+'<section class="connection-section"><h3>Codex</h3><p>'+esc(state.account?.plan||state.account?.type||'未ログイン')+'</p><button id="connect-codex">再接続</button><button id="login-codex">ChatGPTでログイン</button></section><section class="connection-section"><h3>音声入力</h3><p class="small muted">録音を選択した接続先へ送ります。APIの利用枠を使用します。</p>'+c.voice.map(p=>'<label class="connection-key">'+esc(p.label)+'<input type="password" autocomplete="new-password" data-voice-key="'+p.id+'" placeholder="'+(p.configured?'登録済み · 変更する場合だけ入力':'APIキー')+'"><small>'+esc(p.model)+'</small></label>').join('')+'<div class="dialog-actions"><button id="connections-file">設定ファイルを開く</button><button id="connections-save" class="primary">保存</button></div></section>');
+  $('connect-codex').onclick=async()=>{try{Object.assign(state,await api('/connect',{}));await api('/sync',{active:state.active});renderConnection();toast('接続しました');}catch(e){toast(e.message);}};
+  $('login-codex').onclick=async()=>{try{const r=await api('/login',{});if(r.authUrl){closeDialog();await openWeb(r.authUrl);}}catch(e){toast(e.message);}};
+  $('connections-save').onclick=async()=>{try{const data={};document.querySelectorAll('[data-voice-key]').forEach(e=>{if(e.value.trim())data[e.dataset.voiceKey]={apiKey:e.value.trim()};});await api('/connections',data);await showConnections();toast('保存しました');}catch(e){toast(e.message);}};
+  $('connections-file').onclick=async()=>{try{const r=await api('/connections/file',{});closeDialog();await loadLocalPath(r.path);}catch(e){toast(e.message);}};
+}
+action('ai-connections',showConnections);
+$('voice-provider').onchange=()=>{state.ui.voiceByModel||={};state.ui.voiceByModel[task()?.model||'default']=$('voice-provider').value;prefs();};
+const voice=setupVoice({button:$('voice-input'),choice:()=>$('voice-provider').value,api,token,taskId:()=>state.active,settings:showConnections,toast,insert:(id,text)=>{
+  if(state.active===id){const prompt=$('prompt');prompt.value+=(prompt.value?'\n':'')+text;stashDraft();expandComposer(true);prompt.focus();}
+  else{state.drafts[id]=(state.drafts[id]||'')+(state.drafts[id]?'\n':'')+text;toast('録音を開始した案件の下書きへ入力しました');}prefs();
+}});
 action("menu-shortcuts", () => {
   $("app-menu").open = false;
   showShortcuts();
@@ -1166,7 +1193,7 @@ function showPalette() {
   const swatches = [["Nebula", "#b88aff"], ["Aurora", "#40e9bb"], ["Solar", "#ffc857"], ["Rose", "#ff70a9"], ["Ocean", "#5bc5ff"], ["Ember", "#ff9665"]];
   openDialog(dialogHeader('外観')+`<div class="palette-field"><label for="theme-preset">プリセット</label><select id="theme-preset"><option value="custom">カスタム</option>${themePresets.map(p=>`<option value="${p.id}">${p.label} · ${p.mode==='light'?'ライト':'ダーク'}</option>`).join('')}</select></div>
     <div class="palette-field"><label for="theme-mode">モード</label><select id="theme-mode"><option value="dark">ダーク</option><option value="light">ライト</option></select></div>
-    <div class="theme-reading-preview"><strong>Atlas Land</strong><p>考えを整理して、次の一歩へ。</p><small>会話・原稿・ファイルを読みやすく</small></div>
+    <div class="theme-reading-preview"><strong>Atlas Browser</strong><p>考えを整理して、次の一歩へ。</p><small>会話・原稿・ファイルを読みやすく</small></div>
     <div class="palette-field"><label for="font-preset">書体</label><select id="font-preset">${Object.entries(fontPresets).map(([id,p])=>`<option value="${id}">${p.label}</option>`).join('')}</select></div>
     <div class="palette-field"><label for="palette-font">文字サイズ</label><input id="palette-font" type="range" min="14" max="24"><output id="palette-font-value"></output></div>
     <div class="palette-field"><label for="theme-brightness">背景の明るさ</label><input id="theme-brightness" type="range" min="0" max="100"><output id="brightness-value"></output></div>
@@ -1238,7 +1265,8 @@ async function poll() {
   }
 }
 function handleEvent(e) {
-  if(e.type==='bookmarks'){state.bookmarks=e.data;renderBookmarkState();renderBookmarkList();return;}
+  if(e.type==='defaultFolder'){state.defaultFolder=e.data.folder;renderDefaultFolder();return;}
+  if(e.type==='bookmarks'){state.bookmarks=e.data;renderBookmarkState();renderBookmarkList();bookmarkFlyout?.refresh();return;}
   if(e.type==='noteSaved'){noteSaved(e.data);return;}
   if(e.type==='appearance'){setAppearance(e.data);return;}
   if (e.type === "desktopConnection") { state.desktop = e.data; if (task()?.external) scheduleConversation(); }
@@ -1265,6 +1293,7 @@ function handleEvent(e) {
     renderSidebar();
     renderWorkTabs();
     if (state.active === e.data.id) {
+      $('reconnect-task').hidden=!(['disconnected','unknown','failed'].includes(e.data.state)||e.data.syncError);
       $("task-title").textContent = e.data.title;
       if (e.data.state === "queued") {
         $("composer-note").innerHTML =
@@ -1330,7 +1359,7 @@ async function boot() {
   try {
     const b = await api("/bootstrap");
     Object.assign(state, b);
-    state.ui = b.ui || {};
+    state.ui = b.ui || {};document.body.classList.toggle("sidebar-hidden",!!state.ui.sidebarHidden);renderDefaultFolder();
     state.ui.shortcuts = normalizeShortcutBindings(state.ui.shortcuts);
     syncShortcutSettings();
     if (state.ui.appearanceVersion !== 3) { state.ui.bodySize = Math.max(14, (state.ui.bodySize || 19) - 2); state.ui.appearanceVersion = 3; }
@@ -1547,18 +1576,10 @@ function noteSaved({source,file}){
   if(state.activeView===oldKey)state.activeView=newKey;
   renderWorkTabs();renderEditor();prefs();
 }
-function saveNewNote(e){
-  let folder=e.path.replace(/[\\/][^\\/]+$/,'');
-  openDialog(dialogHeader('メモを保存')+`<label for="note-name">ファイル名</label><input id="note-name" style="width:100%;margin:12px 0" value="${esc(e.path.split(/[\\/]/).at(-1))}"><div class="palette-field"><span id="note-destination" style="overflow-wrap:anywhere">${esc(folder)}</span><button id="note-change-folder">変更</button></div><p id="note-save-error" class="request-error" role="alert"></p><div class="dialog-actions"><button id="note-save-cancel">キャンセル</button><button id="note-save-confirm" class="primary">ここに保存</button></div>`);
-  $('note-name').focus();$('note-name').setSelectionRange(0,$('note-name').value.lastIndexOf('.'));
-  $('note-save-cancel').onclick=closeDialog;
-  $('note-change-folder').onclick=async()=>{try{const chosen=await host('chooseFolder',{path:folder});if(chosen){folder=chosen;$('note-destination').textContent=folder;}}catch(x){$('note-save-error').textContent=x.message;}};
-  $('note-save-confirm').onclick=async()=>{
-    $('note-save-confirm').disabled=true;
-    try{const source=e.path,file=await api('/notes/save',{source,folder,name:$('note-name').value,text:e.text,version:e.version,encoding:e.encoding});noteSaved({source,file});closeDialog();toast(file.retained?'保存しました。元の無題ファイルは残しています':'保存しました');}
-    catch(x){$('note-save-error').textContent=x.message;$('note-save-confirm').disabled=false;}
-  };
-  $('note-name').onkeydown=event=>{if(event.key==='Enter'&&!event.isComposing){event.preventDefault();$('note-save-confirm').click();}};
+async function saveNewNote(e){
+  const folder=e.path.replace(/[\\/][^\\/]+$/,''),title=(e.text.trim().split(/\r?\n/)[0]||'メモ').replace(/^[#* >-]+/,'').replace(/[<>:"/\\|?*\x00-\x1f]/g,'').trim().slice(0,55)||'メモ';
+  const name=title+'-'+Date.now().toString(36)+'.md',source=e.path;
+  const file=await api('/notes/save',{source,folder,name,text:e.text,version:e.version,encoding:e.encoding});noteSaved({source,file});toast('保存しました');
 }
 async function loadLocalPath(selected, encoding) {
   const show = (editor) => {
@@ -1768,7 +1789,7 @@ for (const m of ["read", "edit", "source"])
 action("save-file", async () => {
   const id = state.active,
     e = currentEditor();
-  if(e?.untitled){saveNewNote(e);return;}
+  if(e?.untitled){await saveNewNote(e);return;}
   if (!e?.dirty) return;
   $("save-file").disabled = true;
   try {
@@ -1848,6 +1869,7 @@ action("suspend-tabs", async () => {
   toast(count + " 個のタブを休止しました。選ぶと再読込します。");
 });
 function persistTabs() {
+  if(closingWindow)return;
   if(paneMode){paneShell?.persist();return;}
   clearTimeout(persistTabs.timer);
   persistTabs.timer = setTimeout(
@@ -1866,7 +1888,7 @@ function renderBookmarkState(){
 async function saveBookmark(data){state.bookmarks=await api('/bookmarks',data);renderBookmarkState();renderBookmarkList();}
 async function bookmarkPage(){
   const page=state.activeView?.startsWith('web:')&&state.tabs.find(t=>t.id===state.activeTab);
-  if(!page){toast('ブックマークするWebページを開いてください');return;}
+  if(!page){const t=task();if(!t){toast('Webページか案件を開いてください');return;}await saveBookmark({kind:'task',taskId:t.id,title:t.title});toast('案件をブックマークしました');return;}
   const existing=(state.bookmarks||[]).find(b=>b.url===page.url);
   if(existing){editBookmarkDialog(existing);return;}
   await saveBookmark({url:page.url,title:page.title});toast('ブックマークに追加しました');
@@ -1883,26 +1905,30 @@ function renderBookmarkList(){
   if(bookmarkFolder&&!all.some(b=>b.id===bookmarkFolder&&b.kind==='folder'))bookmarkFolder=null;
   $('bookmark-location').textContent=folderPath(bookmarkFolder)||'すべて';$('bookmark-up').disabled=!bookmarkFolder;
   const found=all.filter(b=>query?(b.title+' '+(b.url||'')+' '+folderPath(b.parentId)).toLocaleLowerCase().includes(query):(b.parentId||null)===bookmarkFolder).sort((a,b)=>Number(b.kind==='folder')-Number(a.kind==='folder'));
-  $('bookmark-results').innerHTML=found.length?found.map(b=>`<div class="bookmark-row"><button class="bookmark-open" data-bookmark-open="${esc(b.id)}" title="${esc(b.url||folderPath(b.id))}"><strong>${b.kind==='folder'?'▸ ▱ ':''}${esc(b.title)}</strong><span>${esc(b.kind==='folder'?all.filter(x=>x.parentId===b.id).length+' 件':b.url)}</span></button><button data-bookmark-edit="${esc(b.id)}" aria-label="${esc(b.title)}を編集">編集</button></div>`).join(''):`<div class="empty">${query?'見つかりませんでした':'まだ項目がありません'}</div>`;
+  $('bookmark-results').innerHTML=found.length?found.map(b=>`<div class="bookmark-row"><button class="bookmark-open" data-bookmark-open="${esc(b.id)}" title="${esc(b.url||folderPath(b.id))}"><strong>${b.kind==='folder'?'▸ ▱ ':''}${esc(b.title)}</strong><span>${esc(b.kind==='folder'?all.filter(x=>x.parentId===b.id).length+' 件':b.kind==='task'?'AIとの会話':b.url)}</span></button><button data-bookmark-edit="${esc(b.id)}" aria-label="${esc(b.title)}を編集">編集</button></div>`).join(''):`<div class="empty">${query?'見つかりませんでした':'まだ項目がありません'}</div>`;
 }
 async function showBookmarks(){
   $('app-menu').open=false;state.bookmarks=await api('/bookmarks');
-  openDialog(dialogHeader('ブックマーク')+'<div class="bookmark-toolbar"><button id="bookmark-up" aria-label="親フォルダーへ">←</button><button id="bookmark-root">すべて</button><span id="bookmark-location"></span><button id="bookmark-new-folder">＋ フォルダー</button></div><input id="bookmark-search" type="search" placeholder="名前・URLで検索" aria-label="ブックマークを検索" style="width:100%;margin:10px 0"><div id="bookmark-results"></div>');
+  openDialog(dialogHeader('ブックマーク')+'<div class="bookmark-toolbar"><button id="bookmark-up" aria-label="親フォルダーへ">←</button><button id="bookmark-root">すべて</button><span id="bookmark-location"></span><button id="bookmark-new-folder">＋ フォルダー</button><button id="bookmark-chrome">Chromeと同期</button></div><input id="bookmark-search" type="search" placeholder="名前・URLで検索" aria-label="ブックマークを検索" style="width:100%;margin:10px 0"><div id="bookmark-results"></div>');
+  $('bookmark-chrome').onclick=async()=>{const r=await api('/bookmarks/chrome',{enabled:true});state.bookmarks=await api('/bookmarks');renderBookmarkList();toast(r.profiles?r.count+' 件をChromeから同期しました':'このPCにChromeのブックマークがありません');};
   $('bookmark-search').oninput=renderBookmarkList;
   $('bookmark-up').onclick=()=>{bookmarkFolder=state.bookmarks.find(b=>b.id===bookmarkFolder)?.parentId||null;renderBookmarkList();};
   $('bookmark-root').onclick=()=>{bookmarkFolder=null;$('bookmark-search').value='';renderBookmarkList();};
   $('bookmark-new-folder').onclick=()=>editBookmarkDialog({kind:'folder',title:'',parentId:bookmarkFolder});
-  $('bookmark-results').onclick=event=>{const open=event.target.closest('[data-bookmark-open]'),edit=event.target.closest('[data-bookmark-edit]'),id=open?.dataset.bookmarkOpen||edit?.dataset.bookmarkEdit,b=(state.bookmarks||[]).find(b=>b.id===id);if(!b)return;if(edit)editBookmarkDialog(b);else if(b.kind==='folder'){bookmarkFolder=b.id;$('bookmark-search').value='';renderBookmarkList();}else{closeDialog();openWeb(b.url).catch(e=>toast(e.message));}};
+  $('bookmark-results').onclick=event=>{const open=event.target.closest('[data-bookmark-open]'),edit=event.target.closest('[data-bookmark-edit]'),id=open?.dataset.bookmarkOpen||edit?.dataset.bookmarkEdit,b=(state.bookmarks||[]).find(b=>b.id===id);if(!b)return;if(edit)editBookmarkDialog(b);else if(b.kind==='folder'){bookmarkFolder=b.id;$('bookmark-search').value='';renderBookmarkList();}else{closeDialog();openBookmark(b).catch(e=>toast(e.message));}};
   renderBookmarkList();$('bookmark-search').focus();
 }
 function editBookmarkDialog(bookmark){
   const folder=bookmark.kind==='folder',choices=(state.bookmarks||[]).filter(b=>b.kind==='folder'&&b.id!==bookmark.id);
-  openDialog(dialogHeader(folder?'フォルダー':'ブックマークを編集')+`<div class="bookmark-edit"><label for="bookmark-title">名前</label><input id="bookmark-title" value="${esc(bookmark.title)}">${folder?'':`<label for="bookmark-url">URL</label><input id="bookmark-url" value="${esc(bookmark.url)}">`}<label for="bookmark-folder">保存先</label><select id="bookmark-folder"><option value="">すべて</option>${choices.map(f=>`<option value="${esc(f.id)}" ${bookmark.parentId===f.id?'selected':''}>${esc(folderPath(f.id))}</option>`).join('')}</select></div><p id="bookmark-error" class="request-error" role="alert"></p><div class="dialog-actions"><button id="bookmark-remove" ${bookmark.id?'':'hidden'}>削除</button><span class="spacer"></span><button id="bookmark-cancel">キャンセル</button><button id="bookmark-save" class="primary">保存</button></div>`);
+  openDialog(dialogHeader(folder?'フォルダー':'ブックマークを編集')+`<div class="bookmark-edit"><label for="bookmark-title">名前</label><input id="bookmark-title" value="${esc(bookmark.title)}">${folder||bookmark.kind==='task'?'':`<label for="bookmark-url">URL</label><input id="bookmark-url" value="${esc(bookmark.url)}">`}<label for="bookmark-folder">保存先</label><select id="bookmark-folder"><option value="">すべて</option>${choices.map(f=>`<option value="${esc(f.id)}" ${bookmark.parentId===f.id?'selected':''}>${esc(folderPath(f.id))}</option>`).join('')}</select></div><p id="bookmark-error" class="request-error" role="alert"></p><div class="dialog-actions"><button id="bookmark-remove" ${bookmark.id?'':'hidden'}>削除</button><span class="spacer"></span><button id="bookmark-cancel">キャンセル</button><button id="bookmark-save" class="primary">保存</button></div>`);
   const submit=async remove=>{try{await saveBookmark(remove?{id:bookmark.id,remove:true}:{id:bookmark.id,kind:bookmark.kind,title:$('bookmark-title').value,url:$('bookmark-url')?.value,parentId:$('bookmark-folder').value});await showBookmarks();}catch(e){$('bookmark-error').textContent=e.message;}};
   $('bookmark-save').onclick=()=>submit(false);$('bookmark-remove').onclick=()=>submit(true);$('bookmark-cancel').onclick=()=>showBookmarks().catch(e=>toast(e.message));
 }
 action('bookmark-page',bookmarkPage);action('show-bookmarks',showBookmarks);action('menu-bookmarks',showBookmarks);
-action('rail-bookmarks',()=>{bookmarkFolder=null;return showBookmarks();});
+async function openBookmark(b){if(b.kind==='task'){await selectTask(b.taskId);return;}await openWeb(b.url);}
+const bookmarkFlyout=setupBookmarkFlyout({state,api,open:openBookmark,manage:showBookmarks,layout:syncBrowserLayout,esc,error:toast});
+$('new-note').querySelector('span').innerHTML=svgIcon('note');$('open-web-home').querySelector('span').innerHTML=tabIcon({kind:'web'},null,esc);$('open-files-home').querySelector('span').innerHTML=svgIcon('folder');
+const newTaskShortcut=document.createElement('button');newTaskShortcut.id='new-task-tab';newTaskShortcut.title='新しい案件';newTaskShortcut.innerHTML=tabIcon({kind:'task'},null,esc)+'<span class="rail-label">新しい案件</span>';newTaskShortcut.onclick=()=>newTask().catch(e=>toast(e.message));document.querySelector('.tab-actions').append(newTaskShortcut);
 const pageTranslation=setupPageTranslation({host,api,state,save:prefs,toast});
 function normalizeURL(value) {
   value = value.trim();
@@ -2048,7 +2074,7 @@ function syncBrowserLayout() {
   browserLayoutFrame = requestAnimationFrame(() => {
     browserLayoutFrame = null;
     const slot = $("browser-slot").getBoundingClientRect(),rail=$('pane-tabbar').getBoundingClientRect();
-    const left=Math.min(slot.right,Math.max(slot.x,rail.right));
+    const left=Math.min(slot.right,Math.max(slot.x,rail.right,bookmarkFlyout.right()));
     const r={x:left,y:slot.y,width:Math.max(0,slot.right-left),height:slot.height};
     const visible = paneVisible && !$('workspace-deck').classList.contains('dragging') && state.mode === "work" && state.activeView === "web:" + state.activeTab && !!state.activeTab && !$("dialog").open && !resizing;
     const secondary = state.tabs.find((t) => t.id === state.browserSecondary && t.id !== state.activeTab);
@@ -2243,6 +2269,7 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
   runShortcut(command).catch((error) => toast(error.message));
 }, true);
+action('reconnect-task',async()=>{const t=task();if(!t)return;$('reconnect-task').disabled=true;try{upsert(await api('/tasks/'+t.id+'/reconnect',{}));await loadHistory(t.id);renderSidebar();renderActive();toast('再接続しました');}finally{$('reconnect-task').disabled=false;}});
 action('open-codex',()=>api('/tasks/'+state.active+'/open-source',{}));
 if (native)
   paneBridge.addEventListener("message", (e) => {
@@ -2269,8 +2296,11 @@ if (native)
       api('/sync',{active:state.active}).then(r=>{r.tasks.forEach(upsert);renderSidebar();renderActive();if(state.active)return loadHistory(state.active);}).catch(e=>toast(e.message));return;
     }
     if (m.type === "app.closing" || m.type==='app.saving') {
+      if(m.type==='app.closing'&&voice.active()){toast('音声入力を終了してから閉じてください');return;}
+      closingWindow=m.type==='app.closing';
       stashDraft();
       clearTimeout(prefs.timer);
+      clearTimeout(persistTabs.timer);
       clearTimeout(draftTimer);
       Promise.resolve(paneMode?null:paneShell?.save()).then(()=>Promise.all([
         saveDrafts(),
@@ -2285,9 +2315,9 @@ if (native)
           activeView: state.activeView,
         }),
       ]))
-        .then(() => {if(m.type==='app.closing')postHost("app.exit");})
+        .then(async() => {if(m.type==='app.closing'){await api('/window/reset',{});postHost("app.exit");}})
         .catch((e) =>
-          toast("下書きを保存できないため終了を止めました: " + e.message),
+          {closingWindow=false;toast("下書きを保存できないため終了を止めました: " + e.message);},
         );
       return;
     }
@@ -2307,6 +2337,7 @@ if (native)
       persistTabs();
       syncBrowserLayout();
     }
+    if(m.type==='browser.favicon'){const t=state.tabs.find(t=>t.id===m.id);if(t&&/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(m.icon)){t.icon=m.icon;renderWorkTabs();persistTabs();}return;}
     if (m.type === "browser.state") {
       const t = state.tabs.find((t) => t.id === m.id);
       if (t) {
@@ -2568,7 +2599,7 @@ window.addEventListener("beforeunload", (e) => {
     e.returnValue = "";
   }
 });
-function describeView(v){if(!v)return null;const tab=state.tabs.find(t=>t.id===v.id);return {...v,tab:tab?{id:tab.id,url:tab.url,title:tab.title}:v.tab,task:state.tasks.find(t=>t.id===(v.taskId||v.id))||v.task};}
+function describeView(v){if(!v)return null;const tab=state.tabs.find(t=>t.id===v.id);return {...v,tab:tab?{id:tab.id,url:tab.url,title:tab.title,icon:tab.icon}:v.tab,task:state.tasks.find(t=>t.id===(v.taskId||v.id))||v.task};}
 async function focusContent(){
   if(state.activeView?.startsWith('web:')){await host('browser.focus',{id:state.activeTab});return;}
   if(native)await host('window.focusUI');
@@ -2585,9 +2616,9 @@ paneShell=setupPanes({
     if(!state.viewTabs.some(t=>t.key===v.key))state.viewTabs.push(v);
     await selectView(v.key);
   },
-  merge(v){if(v.task)upsert(v.task);if(v.tab){const t=state.tabs.find(t=>t.id===v.tab.id);if(t)Object.assign(t,{title:v.tab.title,url:v.tab.url});else state.tabs.push({...v.tab,loaded:false});}if(!state.viewTabs.some(t=>t.key===v.key))state.viewTabs.push(v);renderWorkTabs();persistTabs();},
+  merge(v){if(v.task)upsert(v.task);if(v.tab){const t=state.tabs.find(t=>t.id===v.tab.id);if(t)Object.assign(t,{title:v.tab.title,url:v.tab.url,icon:v.tab.icon});else state.tabs.push({...v.tab,loaded:false});}if(!state.viewTabs.some(t=>t.key===v.key))state.viewTabs.push(v);renderWorkTabs();persistTabs();},
   rememberLayout(value){state.ui.paneWorkspace=value;state.ui.rightPane=null;prefs();},
-  snapshot(){return {views:state.viewTabs.map(describeView),tabs:state.tabs.map(t=>({id:t.id,url:t.url,title:t.title})),activeView:state.activeView};},
+  snapshot(){return {views:state.viewTabs.map(describeView),tabs:state.tabs.map(t=>({id:t.id,url:t.url,title:t.title,icon:t.icon})),activeView:state.activeView};},
   async restore(saved={}){
     stashDraft();
     const views=saved.views||[],tabs=saved.tabs||[];
@@ -2607,7 +2638,7 @@ paneShell=setupPanes({
   move(key,delta){state.viewTabs=moveTab(state.viewTabs,key,delta);renderWorkTabs();prefs();},
   place(key,index){const view=state.viewTabs.find(v=>v.key===key);if(!view)return;state.viewTabs=state.viewTabs.filter(v=>v.key!==key);state.viewTabs.splice(Math.max(0,Math.min(index,state.viewTabs.length)),0,view);renderWorkTabs();prefs();},
   visibility(v){paneVisible=v;syncBrowserLayout();},
-  async save(){stashDraft();await saveDrafts();prefs();},drafts:()=>state.drafts,
+  async save(){if(voice.active())throw Error('音声入力を終了してから閉じてください');stashDraft();await saveDrafts();prefs();},drafts:()=>state.drafts,
   mergeDrafts(d){Object.assign(state.drafts,d);prefs();},
 });
 boot();

@@ -15,7 +15,7 @@ const read=async id=>(await fetch(base.origin+'/api/bootstrap',{headers:{...head
 const goto=async(p,id)=>{const url=new URL(ready.url);url.searchParams.set('window',id);await p.goto(url.href);};
 try{
  await goto(a,'main');await a.locator('#editor-name').filter({hasText:'review.md'}).waitFor();
- await goto(b,'window-2');await b.locator('#secondary-frame').waitFor();
+ await goto(b,'window-2');await b.locator('#open-web-home').waitFor();assert.equal(await b.locator('.pane-frame').count(),0);
  assert.equal(await b.locator('#work-tabs button[data-view]').count(),0);
  await b.locator('#open-web-home').click();
  await b.locator('#address').fill('https://example.org/second-window');
@@ -28,6 +28,7 @@ try{
  assert.equal(await a.locator('#work-tabs button[data-view]').count(),3);
  // Closing the first UI doesn't stop the shared server or second window.
  await a.close();assert((await read('window-2')).ui);
+ await b.locator('#pane-split').click();
  const secondary=b.frameLocator('#secondary-frame');await secondary.locator('#open-web-home').click();await secondary.locator('#address').waitFor();
  await b.locator('#pane-split').click();await b.locator('.pane-frame').nth(1).waitFor();
  for(let i=0;i<60&&(await read('window-2')).ui.paneWorkspace.panes.length!==2;i++)await new Promise(r=>setTimeout(r,100));

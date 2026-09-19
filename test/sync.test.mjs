@@ -8,6 +8,8 @@ import net from "node:net";
 import crypto from "node:crypto";
 
 test("empty drafts stay hidden and every started task has exactly one lane", () => {
+  assert.equal(runtimeState('active'), 'running');
+  assert.equal(runtimeState('idle'), 'completed');
   assert.equal(hasConversation({ title: "新しい案件", state: "idle" }), false);
   for (const state of ["running", "waiting", "completed", "failed", "interrupted", "unknown"]) {
     const t = { state, hasConversation: true };
@@ -17,6 +19,17 @@ test("empty drafts stay hidden and every started task has exactly one lane", () 
   assert.equal(runtimeState({ type: "active", activeFlags: [] }, { status: "interrupted" }), "running");
   assert.equal(runtimeState({ type: "notLoaded" }), "unknown");
   assert.equal(runtimeState({ type: "active", activeFlags: ["waitingOnApproval"] }), "waiting");
+});
+
+test('dismissed tasks stay hidden across sync restarts and reappear only on new activity; custom titles stay',async()=>{
+ const t={id:'task',title:'自分のタイトル',customTitle:true,external:true,hasConversation:true};let text='old';
+ const options={store:{data:{desktopContextId:'context'}},connect:async()=>{},update(){},emit(){},cleanItem:i=>i,
+  bridge:{async call(){return {data:[{id:'turn',status:'completed',items:[{id:'reply',type:'agentMessage',text}]}]};}},
+  desktop:{async ready(){},async call(){return {thread:{title:'auto-generated',status:'idle',updatedAt:1}};},close(){}}
+ };
+ await new DesktopSync(options).read(t);t.stored=true;t.storedActivityVersion=t.activityVersion;
+ await new DesktopSync(options).read(t);assert(t.stored);assert.equal(t.title,'自分のタイトル');
+ text='new reply';await new DesktopSync(options).read(t);assert(!t.stored);assert(t.unread);assert.equal(t.title,'自分のタイトル');
 });
 test("Atlas follow-ups remain visible and other agents are not labelled as the user", () => {
   const item = { id: "input", type: "functionCallOutput", namespace: "codex_app", name: "send_message_to_thread", output: "<codex_delegation>\n<source_thread_id>atlas-context</source_thread_id>\n<input>次の指示 <literal></input>\n</codex_delegation>" };
@@ -36,7 +49,7 @@ test("desktop sends keep the original thread and model; uncertain sends are neve
   assert.equal(calls[0][0], "send_message_to_thread");
   assert.equal(calls[0][1].threadId,'original');assert.equal(calls[0][1].hostId,'local');
   assert.equal(calls[0][1].model,undefined);assert.equal(calls[0][1].thinking,undefined);
-  assert(calls[0][1].prompt.startsWith('続きの指示\n\nAtlas Landでの作業方針'));
+  assert(calls[0][1].prompt.startsWith('続きの指示\n\nAtlas Browserでの作業方針'));
   await sync.send(task,{text:'次の作業'});
   assert.equal(calls[1][1].prompt,'次の作業');
   assert.equal(calls[0][2], "atlas-context");

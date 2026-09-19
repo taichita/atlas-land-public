@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Atlas Land</title>
-    <link rel="icon" href="/assets/gpt-atlas.ico" />
+    <title>Atlas Browser</title>
+    <link rel="icon" href="/assets/atlas-browser.ico" />
     <link rel="stylesheet" href="/fonts.css" />
     <link rel="stylesheet" href="/style.css" />
     <script src="/vendor/papaparse.js" defer></script>
@@ -15,9 +15,10 @@
       <button id="sidebar-toggle" class="icon" aria-label="案件一覧の表示切替">
         ☰
       </button>
+      <button id="sidebar-notification" hidden aria-label="新しい返答を開く" title="新しい返答"></button>
       <div class="brand">
-        <img class="brand-icon" src="/assets/gpt-atlas.png" alt="" />
-        <span>Atlas Land</span>
+        <img class="brand-icon" src="/assets/atlas-browser.png" alt="" />
+        <span>Atlas Browser</span>
       </div>
       <nav class="mode-switch">
         <button id="work-mode" aria-pressed="true">作業</button
@@ -40,6 +41,8 @@
             <span>キーボード ショートカット</span><kbd id="menu-shortcut-key">F1</kbd>
           </button>
           <button id="settings-button">設定と接続</button>
+          <button id="ai-connections">AIの接続・音声入力</button>
+          <button id="import-task">Codexの会話を探す</button>
         </div>
       </details>
     </header>
@@ -50,7 +53,7 @@
         </div>
         <div class="side-actions">
           <button id="new-task" class="primary">＋ 新しい案件</button
-          ><button id="import-task" title="Codexの案件を開く">開く</button>
+          ><button id="default-folder" title="新しい案件の既定フォルダ">既定フォルダ</button>
         </div>
         <input
           id="task-search"
@@ -129,7 +132,7 @@
           <div class="taskbar">
             <div>
               <h1>
-                <button id="task-title" title="案件名を変更">Atlas Land</button>
+                <button id="task-title" title="案件名を変更">Atlas Browser</button>
               </h1>
               <button id="task-folder" class="muted" title="作業フォルダを変更">
                 C:\dev
@@ -138,6 +141,7 @@
             <div class="task-actions">
               <span id="task-status" class="badge"></span
               ><button id="open-codex" hidden>Codexで開く</button
+              ><button id="reconnect-task" hidden>再接続</button
               ><button id="store-task" hidden>保管する</button
               ><button id="inspect-task" hidden>関係 ↗</button>
               <div class="layout-switch">
@@ -153,10 +157,10 @@
                 <div class="welcome">
                   <img
                     class="welcome-icon"
-                    src="/assets/gpt-atlas.png"
+                    src="/assets/atlas-browser.png"
                     alt=""
                   />
-                  <h2>Atlas Land</h2>
+                  <h2>Atlas Browser</h2>
                   <button id="welcome-new" class="primary">新しい案件</button>
                 </div>
               </div>
@@ -175,6 +179,8 @@
                 ></textarea>
                 <div class="composer-bar">
                   <button type="button" id="attach-image" title="画像を添付（Ctrl＋Vでも貼り付け）">＋ 画像</button>
+                  <button type="button" id="voice-input" title="音声入力" aria-label="音声入力">🎙</button>
+                  <select id="voice-provider" aria-label="音声入力の接続先" title="このモデルで使う音声入力"><option value="auto">音声：自動</option><option value="groq">Groq</option><option value="openai">OpenAI</option></select>
                   <input type="file" id="image-picker" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
                   <select id="model" aria-label="モデル"></select
                   ><select id="effort" aria-label="思考の深さ"></select

@@ -84,7 +84,7 @@ export class CodexBridge extends EventEmitter {
       {
         clientInfo: {
           name: "personal_ai_workspace",
-          title: "Atlas Land",
+          title: "Atlas Browser",
           version: "0.3.1",
         },
         capabilities: { experimentalApi: true },

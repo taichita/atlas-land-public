@@ -40,10 +40,10 @@ class Workspace : Form {
   session=new Session();var wait=ThreadPool.RegisterWaitForSingleObject(signal,(s,t)=>session.DispatchNew(),null,Timeout.Infinite,false);
   Application.Run(session);wait.Unregister(null);Lifecycle("app.message-loop-ended");
  }}
- Workspace(string id){windowId=id;DefaultShortcuts();Text="Atlas Land";Width=1480;Height=950;MinimumSize=new Size(860,620);StartPosition=FormStartPosition.CenterScreen;BackColor=Color.FromArgb(19,19,19);ForeColor=Color.White;AutoScaleMode=AutoScaleMode.Dpi;
-  Controls.Add(new Label { Text="Atlas Land を開いています…",Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleCenter,Font=new Font("Yu Gothic",16) });
-  string iconFile=Path.Combine(appDir,"public","assets","gpt-atlas.ico");if(File.Exists(iconFile))Icon=new Icon(iconFile);
-  tray=new NotifyIcon{Icon=Icon,Text="Atlas Land",Visible=false};tray.DoubleClick+=(s,e)=>Restore();var menu=new ContextMenuStrip();menu.Items.Add("開く",null,(s,e)=>Restore());menu.Items.Add("終了",null,(s,e)=>{if(running>0&&MessageBox.Show("実行中の作業を中断して終了しますか？","Atlas Land",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;exiting=true;Close();});tray.ContextMenuStrip=menu;
+ Workspace(string id){windowId=id;DefaultShortcuts();Text="Atlas Browser";Width=1480;Height=950;MinimumSize=new Size(860,620);StartPosition=FormStartPosition.CenterScreen;BackColor=Color.FromArgb(19,19,19);ForeColor=Color.White;AutoScaleMode=AutoScaleMode.Dpi;
+  Controls.Add(new Label { Text="Atlas Browser を開いています…",Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleCenter,Font=new Font("Yu Gothic",16) });
+  string iconFile=Path.Combine(appDir,"public","assets","atlas-browser.ico");if(File.Exists(iconFile))Icon=new Icon(iconFile);
+  tray=new NotifyIcon{Icon=Icon,Text="Atlas Browser",Visible=false};tray.DoubleClick+=(s,e)=>Restore();var menu=new ContextMenuStrip();menu.Items.Add("開く",null,(s,e)=>Restore());menu.Items.Add("終了",null,(s,e)=>{if(running>0&&MessageBox.Show("実行中の作業を中断して終了しますか？","Atlas Browser",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;exiting=true;Close();});tray.ContextMenuStrip=menu;
   BindShortcuts(this,null);Shown+=async(s,e)=>await Boot();Resize+=(s,e)=>{if(WindowState==FormWindowState.Minimized)HidePages();else LayoutPage();};FormClosing+=OnClosing;
  }
  void Restore(){Show();WindowState=FormWindowState.Normal;Activate();tray.Visible=false;LayoutPage();}
@@ -51,6 +51,8 @@ class Workspace : Form {
   Directory.CreateDirectory(profile);
   string node=Environment.GetEnvironmentVariable("AI_WORKSPACE_NODE");if(String.IsNullOrEmpty(node))node=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"nodejs","node.exe");if(!File.Exists(node))throw new Exception("Node.js が見つかりません。AI_WORKSPACE_NODE を設定してください。");
   var info=new ProcessStartInfo(node,"\""+Path.Combine(appDir,"server","main.mjs")+"\""){WorkingDirectory=appDir,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
+  info.EnvironmentVariables["ATLAS_FRESH_SESSION"]=Environment.GetCommandLineArgs().Contains("--restore")?"0":"1";
+  if(Environment.GetEnvironmentVariable("ATLAS_PROFILE")==null)info.EnvironmentVariables["ATLAS_CHROME_SYNC"]="1";
   backend=Process.Start(info);var startedBackend=backend;Lifecycle("backend.start pid="+startedBackend.Id);startedBackend.Exited+=(s,e)=>{try{Lifecycle("backend.exit pid="+startedBackend.Id+" code="+startedBackend.ExitCode);}catch{}};startedBackend.EnableRaisingEvents=true;backend.ErrorDataReceived+=(s,e)=>{if(!String.IsNullOrEmpty(e.Data))try{File.AppendAllText(Path.Combine(profile,"host-errors.log"),DateTime.Now.ToString("s")+" "+e.Data+Environment.NewLine);}catch{}};backend.BeginErrorReadLine();
   var lineTask=backend.StandardOutput.ReadLineAsync();if(await Task.WhenAny(lineTask,Task.Delay(20000))!=lineTask)throw new Exception("バックエンドの起動がタイムアウトしました");string line=await lineTask;if(String.IsNullOrEmpty(line))throw new Exception("バックエンドを起動できませんでした。host-errors.log を確認してください。");
   var ready=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line);string url=Convert.ToString(ready["url"]);var uri=new Uri(url);origin=uri.GetLeftPart(UriPartial.Authority);token=uri.Fragment.TrimStart('#');return url;
@@ -129,7 +131,7 @@ class Workspace : Form {
   else if(action=="browser.speed"&&pages.ContainsKey(id)){double speed=Convert.ToDouble(m["speed"]);if(speed<0.25||speed>8)throw new Exception("速度は0.25〜8倍で指定してください");string speedText=speed.ToString(System.Globalization.CultureInfo.InvariantCulture);string count=await pages[id].CoreWebView2.ExecuteScriptAsync("(()=>{let v=document.querySelectorAll('video,audio');v.forEach(x=>x.playbackRate="+speedText+");return v.length})()");Post(new{type="response",requestId=requestId,result=json.DeserializeObject(count)});return;}
   else if(action=="chooseFolder"){HidePages();using(var picker=new FolderBrowserDialog{Description="作業フォルダ",SelectedPath=Str(m,"path",@"C:\dev"),ShowNewFolderButton=true}){string selected=picker.ShowDialog(this)==DialogResult.OK?picker.SelectedPath:null;Post(new{type="response",requestId=requestId,result=selected});}LayoutPage();return;}
   else if(action=="chooseFile"){HidePages();using(var picker=new OpenFileDialog{Title="Atlasで開くファイル",InitialDirectory=Str(m,"path",@"C:\dev"),Filter="対応ファイル|*.txt;*.md;*.markdown;*.csv;*.tsv;*.json;*.html;*.htm;*.pdf;*.mp4;*.webm;*.mov;*.m4v;*.mp3;*.wav;*.m4a;*.ogg;*.flac;*.png;*.jpg;*.jpeg;*.webp;*.gif;*.svg|すべてのファイル|*.*",CheckFileExists=true,Multiselect=false}){string selected=picker.ShowDialog(this)==DialogResult.OK?picker.FileName:null;Post(new{type="response",requestId=requestId,result=selected});}LayoutPage();return;}
-  else if(action=="activity"){running=Num(m,"running");tray.Text=running>0?"Atlas Land · "+running+" 件の作業":"Atlas Land";}
+  else if(action=="activity"){running=Num(m,"running");tray.Text=running>0?"Atlas Browser · "+running+" 件の作業":"Atlas Browser";}
   else if(action=="file.reveal"){
    string target=Str(m,"path");if(String.IsNullOrWhiteSpace(target)||target.IndexOf('"')>=0||target.Any(Char.IsControl)||!Path.IsPathRooted(target)||target.StartsWith(@"\\"))throw new Exception("ローカルのファイルまたはフォルダを指定してください");
    target=Path.GetFullPath(target);bool directory=Directory.Exists(target);if(!directory&&!File.Exists(target))throw new Exception("保存場所が見つかりません: "+target);
@@ -142,7 +144,7 @@ class Workspace : Form {
   else if(action=="window.dual")session.Dual(this);
   else if(action=="window.ready"){uiReady=true;if(prepareTwo){prepareTwo=false;Post(new{type="window.twoPanes"});}}
   else if(action=="window.focusUI")ui.Focus();
-  else if(action=="app.exit"){exiting=true;Close();}
+  else if(action=="app.exit"){if(running>0&&session.Count==1){Hide();tray.Visible=true;foreach(var page in pages.Values)page.Dispose();pages.Clear();browserBounds.Clear();browserVisible=false;activePage=null;ui.CoreWebView2.Reload();}else{exiting=true;Close();}}
   Post(new{type="response",requestId=requestId,result=true});
  }catch(Exception error){Post(new{type="response",requestId=requestId,error=error.Message});}}
  async Task<WebView2> GetPage(string id){if(pages.ContainsKey(id))return pages[id];if(browsing==null)browsing=await CoreWebView2Environment.CreateAsync(null,Path.Combine(profile,"webview","browsing"));
@@ -160,6 +162,7 @@ class Workspace : Form {
   await page.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(File.ReadAllText(Path.Combine(appDir,"native","media-shortcuts.js")));
   page.CoreWebView2.DOMContentLoaded+=(s,e)=>MediaSettings(page);
   page.CoreWebView2.NavigationStarting+=(s,e)=>{if(!IsWeb(e.Uri)&&e.Uri!="about:blank"){e.Cancel=true;Post(new{type="browser.error",id=id,error="この種類のリンクは未対応です: "+new Uri(e.Uri).Scheme});}};
+  page.CoreWebView2.FaviconChanged+=async(s,e)=>{try{using(var icon=await page.CoreWebView2.GetFaviconAsync(CoreWebView2FaviconImageFormat.Png))using(var bytes=new MemoryStream()){await icon.CopyToAsync(bytes);if(bytes.Length>0&&bytes.Length<=131072)Post(new{type="browser.favicon",id=id,icon="data:image/png;base64,"+Convert.ToBase64String(bytes.ToArray())});}}catch{}};
   Action state=()=>Post(new{type="browser.state",id=id,url=page.CoreWebView2.Source,title=page.CoreWebView2.DocumentTitle,back=page.CoreWebView2.CanGoBack,forward=page.CoreWebView2.CanGoForward});
   page.CoreWebView2.DocumentTitleChanged+=(s,e)=>state();page.CoreWebView2.SourceChanged+=(s,e)=>state();page.CoreWebView2.HistoryChanged+=(s,e)=>state();page.CoreWebView2.NavigationCompleted+=(s,e)=>{state();if(!e.IsSuccess)Post(new{type="browser.error",id=id,error="ページを読み込めませんでした: "+e.WebErrorStatus.ToString()});};
   page.CoreWebView2.NewWindowRequested+=async(s,e)=>{e.Handled=true;if(!IsWeb(e.Uri))return;using(var defer=e.GetDeferral()){string child=(id.Contains(":")?id.Substring(0,id.IndexOf(":")+1):"")+"web-"+Guid.NewGuid().ToString("N");try{var popup=await GetPage(child);e.NewWindow=popup.CoreWebView2;activePage=child;Post(new{type="browser.created",id=child,url=e.Uri,title="新しいタブ"});LayoutPage();}catch(Exception err){Post(new{type="browser.error",id=id,error=err.Message});}}};
@@ -172,7 +175,6 @@ class Workspace : Form {
   if(disposedViews)return;
   Lifecycle("window.closing id="+windowId+" reason="+e.CloseReason+" exiting="+exiting+" running="+running);
   if(e.CloseReason==CloseReason.WindowsShutDown){session.SavePosition(this);Post(new{type="app.saving"});exiting=true;}
-  if(!exiting&&running>0&&session.Count==1){e.Cancel=true;Hide();tray.Visible=true;return;}
   if(!exiting&&ui!=null&&ui.CoreWebView2!=null){e.Cancel=true;Post(new{type="app.closing"});return;}
   session.SavePosition(this);disposedViews=true;tray.Dispose();foreach(var p in pages.Values)p.Dispose();if(ui!=null)ui.Dispose();
  }
@@ -184,10 +186,10 @@ class Workspace : Form {
   WindowSettings settings=new WindowSettings(); bool shuttingDown=false,restoring=true,recovering=false;int recoveries=0;uint lastFailedProcess=0;DateTime lastRecovery=DateTime.MinValue;
   public int Count{get{return windows.Count;}}
   public Session(){var handle=dispatcher.Handle;try{if(File.Exists(settingsFile))settings=serializer.Deserialize<WindowSettings>(File.ReadAllText(settingsFile));}catch{settings=new WindowSettings();}
-   settings=settings??new WindowSettings();settings.Positions=settings.Positions??new Dictionary<string,Placement>();int count=Math.Max(1,Math.Min(8,settings.Count));
+   settings=settings??new WindowSettings();settings.Positions=settings.Positions??new Dictionary<string,Placement>();int count=Environment.GetCommandLineArgs().Contains("--restore")?Math.Max(1,Math.Min(8,settings.Count)):1;settings.Count=count;
    for(int i=0;i<count;i++)Open();restoring=false;
   }
-  public void DispatchNew(){try{if(!shuttingDown&&!dispatcher.IsDisposed)dispatcher.BeginInvoke(new Action(()=>{if(!shuttingDown)Open();}));}catch{}}
+  public void DispatchNew(){try{if(!shuttingDown&&!dispatcher.IsDisposed)dispatcher.BeginInvoke(new Action(()=>{if(!shuttingDown){var hidden=windows.FirstOrDefault(w=>!w.Visible);if(hidden!=null)hidden.Restore();else Open();}}));}catch{}}
   public void Wake(){try{dispatcher.BeginInvoke(new Action(()=>{foreach(var w in windows){w.Post(new{type="app.resumed"});w.LayoutPage();}}));}catch{}}
   public void RecoverViews(uint processId){try{dispatcher.BeginInvoke(new Action(async()=>{
    if(shuttingDown||recovering||lastFailedProcess==processId)return;recovering=true;lastFailedProcess=processId;

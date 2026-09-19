@@ -69,10 +69,9 @@ test("local HTTP service persists drafts, streams media ranges and isolates prev
     assert.equal((await api('/agent-policy',{instructions:'短い方針'})).status,200);
     assert.equal((await (await api('/agent-policy')).json()).instructions,'短い方針');
     assert.equal((await api('/agent-policy',{instructions:'x'.repeat(6001)})).status,400);
-    const pendingEvents = fetch(url.origin + "/api/events", { headers, signal: AbortSignal.timeout(4000) }).then(r => r.json());
-    await new Promise(r => setTimeout(r, 60));
     await api("/tasks/http-test/settings", { stored: true });
-    assert.equal((await pendingEvents).events.at(-1).data.stored, true);
+    const events=await(await fetch(url.origin+'/api/events',{headers,signal:AbortSignal.timeout(4000)})).json();
+    assert(events.events.some(e=>e.type==='task'&&e.data.id==='http-test'&&e.data.stored===true));
     assert.equal((await fetch(url.origin + "/api/graph")).status, 401);
     assert.equal(
       (

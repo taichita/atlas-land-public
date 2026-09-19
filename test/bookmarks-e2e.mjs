@@ -15,7 +15,7 @@ try{
  await page.locator('#open-web-home').click();await page.locator('#address').fill('https://example.org/research');await page.locator('#address').press('Enter');
  await page.locator('#bookmark-page').click();await page.locator('#bookmark-page').filter({hasText:'★'}).waitFor();
  // Open from a file pane: no Web tab is required.
- await peer.locator('#rail-bookmarks').click();await peer.locator('.bookmark-row').waitFor();
+ await peer.locator('#rail-bookmarks').hover();await peer.locator('.bookmark-manage').click();await peer.locator('.bookmark-row').waitFor();
  assert.equal(await peer.locator('.bookmark-row').count(),1);
  await peer.locator('[data-bookmark-edit]').click();await peer.locator('#bookmark-title').fill('調査の参考資料');await peer.locator('#bookmark-save').click();await peer.locator('.bookmark-row').filter({hasText:'調査の参考資料'}).waitFor();
  await peer.locator('#bookmark-new-folder').click();await peer.locator('#bookmark-title').fill('制作');await peer.locator('#bookmark-save').click();
@@ -29,6 +29,10 @@ try{
  await page.reload();await page.locator('#bookmark-page').filter({hasText:'★'}).waitFor();await page.locator('#show-bookmarks').click();
  await page.locator('[data-bookmark-open]').filter({hasText:'制作'}).click();await page.locator('[data-bookmark-open]').filter({hasText:'資料'}).click();
  assert.match(await page.locator('#bookmark-results').textContent(),/調査の参考資料/);
+ await page.locator('#dialog').evaluate(e=>e.close());
+ await page.locator('#rail-bookmarks').hover();await page.locator('[data-quick-bookmark]').filter({hasText:'制作'}).hover();await page.locator('[data-quick-bookmark]').filter({hasText:'資料'}).hover();await page.locator('[data-quick-bookmark]').filter({hasText:'調査の参考資料'}).click();
+ assert.equal(await page.locator('#address').inputValue(),'https://example.org/research');
+ await page.locator('#show-bookmarks').click();await page.locator('#bookmark-root').click();await page.locator('[data-bookmark-open]').filter({hasText:'制作'}).click();await page.locator('[data-bookmark-open]').filter({hasText:'資料'}).click();
  const saved=JSON.parse(await fs.readFile(path.join(ready.data,'workspace.json'),'utf8'));assert.equal(saved.bookmarks.length,3);
  await page.screenshot({path:'.test-data/bookmarks.png'});
  await page.locator('[data-bookmark-edit]').click();await page.locator('#bookmark-remove').click();await page.locator('#bookmark-results .empty').waitFor();

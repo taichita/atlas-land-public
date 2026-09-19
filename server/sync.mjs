@@ -1,4 +1,5 @@
 import { DesktopBridge } from "./desktop.mjs";
+import crypto from 'node:crypto';
 import {policyFor,policyHash,policyUpdate} from './agent-policy.mjs';
 
 export function desktopMessage(item, contextId) {
@@ -9,7 +10,7 @@ export function desktopMessage(item, contextId) {
 }
 
 export function runtimeState(status, turn) {
-  const type = status?.type;
+  const type = typeof status==='string'?status:status?.type;
   if (type === "active") return status.activeFlags?.some(f => /waiting/i.test(f)) ? "waiting" : "running";
   if (type === "systemError") return "failed";
   if (turn?.status === "inProgress") return "running";
@@ -44,8 +45,8 @@ export class DesktopSync {
       await this.connect();
       const { thread } = await this.bridge.call("thread/start", { cwd: this.store.dir, sandbox: "read-only", approvalPolicy: "on-request", deferGoalContinuation: true });
       // Persist an app-owned caller context without starting an AI turn.
-      await this.bridge.call("thread/inject_items", { threadId: thread.id, items: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Atlas Landのアプリ接続用コンテキストです。ユーザーの作業案件ではありません。" }] }] });
-      await this.bridge.call("thread/name/set", { threadId: thread.id, name: "Atlas Land · アプリ接続" });
+      await this.bridge.call("thread/inject_items", { threadId: thread.id, items: [{ type: "message", role: "user", content: [{ type: "input_text", text: "Atlas Browserのアプリ接続用コンテキストです。ユーザーの作業案件ではありません。" }] }] });
+      await this.bridge.call("thread/name/set", { threadId: thread.id, name: "Atlas Browser · アプリ接続" });
       this.store.data.desktopContextId = thread.id;
       this.store.save();
       return thread.id;
@@ -91,7 +92,7 @@ export class DesktopSync {
           if (!t.customTitle) t.title = entry.title || t.title;
           t.cwd = entry.cwd; t.source = "desktop";
           t.sourceUpdatedAt = entry.updatedAt * 1000;
-          if (entry.status?.type === "active") t.state = runtimeState(entry.status);
+          if ((entry.status?.type||entry.status) === "active") t.state = runtimeState(entry.status);
           if (changed || fresh) {
             try { await this.read(t, { initial: fresh }); }
             catch (e) { this.readFailed(t,e); }
@@ -151,6 +152,9 @@ export class DesktopSync {
       this.emit("historyUpdated", { threadId: t.id, ...result });
     }
     const last = turns[0];
+    const activityVersion=crypto.createHash('sha256').update(JSON.stringify([last?.id,last?.status,last?.items?.filter(i=>i.type==='userMessage'||i.type==='agentMessage')])).digest('hex');
+    if(t.stored&&((t.storedActivityVersion&&activityVersion!==t.storedActivityVersion)||(!t.storedActivityVersion&&r.thread?.updatedAt*1000>(t.storedSourceUpdatedAt||t.storedAt||Date.now())))){t.stored=false;t.unread=true;}
+    t.activityVersion=activityVersion;
     t.hasConversation = !!r.thread?.preview?.trim() || turns.some(turn => turn.items.some(i => i.type === "userMessage" || i.type === "agentMessage")) || t.hasConversation;
     if (!t.customTitle) t.title = r.thread?.title || t.title;
     t.cwd = r.thread?.cwd || t.cwd;

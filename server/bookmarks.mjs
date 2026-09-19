@@ -14,6 +14,12 @@ export function editBookmark(list,input){
     const value={id:input.id||crypto.randomUUID(),kind,title,parentId,createdAt:previous?.createdAt||Date.now()};
     if(index<0)list.unshift(value);else list[index]=value;return value;
   }
+  if(kind==='task'){
+    const taskId=input.taskId||previous?.taskId;if(typeof taskId!=='string'||!taskId)fail('案件を選んでください');
+    const existing=list.find(b=>b.kind==='task'&&b.taskId===taskId&&b.id!==input.id);if(existing)return existing;
+    const value={id:input.id||crypto.randomUUID(),kind,taskId,title:String(input.title||previous?.title||'案件').slice(0,200),parentId,createdAt:previous?.createdAt||Date.now()};
+    if(index<0)list.unshift(value);else list[index]=value;return value;
+  }
   let url;try{url=new URL(input.url);}catch{fail('URLを確認してください');}
   if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.href.length>8000)fail('http / https のページを指定してください');
   const existing=list.find(b=>b.url===url.href&&b.id!==input.id);

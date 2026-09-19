@@ -14,6 +14,7 @@ try {
  await page.goto(ready.url);await page.locator('#editor-name').filter({hasText:'review.md'}).waitFor();
  const rail=page.locator('#pane-tabbar');assert.equal((await rail.boundingBox()).width,46);
  await rail.hover();await page.waitForFunction(()=>document.querySelector('#pane-tabbar').dataset.expanded==='true');
+ assert.equal(Math.round((await rail.boundingBox()).width),188);
  await page.locator('#tab-search').fill('参考資料 79');assert.equal(await page.locator('#work-tabs [data-tab-key]:visible').count(),1);
  await page.getByRole('button',{name:'参考資料 79',exact:true}).click();await page.locator('#address').waitFor();assert.equal(await page.locator('#address').inputValue(),'https://example.org/79');
  await page.waitForFunction(()=>{const r=document.querySelector('#pane-tabbar').getBoundingClientRect();return __hosts.filter(m=>m.action==='browser.layout').at(-1)?.panes?.some(p=>p.id==='web-79'&&p.x>=r.right);});

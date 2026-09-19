@@ -1,17 +1,18 @@
-# Atlas Land — Windows AI workspace and browser
+# Atlas Browser — Windows AI workspace and browser
 
 ローカルCodex、Web閲覧、会話、ファイル編集を同じ画面で扱う、個人開発のWindowsアプリです。OpenAIの公式製品ではありません。
 
 ## 起動と配布
 
-[Releases](https://github.com/taichita/atlas-land-public/releases)からZIPを取得し、全展開して `dist/AtlasLand.exe` を開きます。exe単体では動きません。Windows 11 x64、.NET Framework 4.8、WebView2 Evergreen Runtime、Node.js 24が必要です。AI連携には利用先PCのCodexと認証が必要です。
+[Releases](https://github.com/taichita/atlas-land-public/releases)からZIPを取得し、全展開して `dist/AtlasBrowser.exe` を開きます。exe単体では動きません。Windows 11 x64、.NET Framework 4.8、WebView2 Evergreen Runtime、Node.js 24が必要です。AI連携には利用先PCのCodexと認証が必要です。
 
 [はじめに](docs/preview-start.md) / [職場での利用確認](docs/workplace-review.md) / [更新と配布](docs/updates.md)
 
 ## 主な機能
 
 - [縦型タブ](docs/vertical-tabs.md)：普段はアイコン表示、ホバーで名前と検索を表示。
-- [複数ウィンドウ](docs/multiple-windows.md)と[ペイン](docs/multiple-panes.md)、タブの移動、配置の保存と復元。
+- [複数ウィンドウ](docs/multiple-windows.md)と[ペイン](docs/multiple-panes.md)、タブの移動。通常起動は空の1ウィンドウ、障害からの復旧は作業中の表示を復元。
+- [自分向けの操作](docs/personalization.md): 既定フォルダ、案件の片づけ、通知、Chromeブックマーク、メモの即保存、音声入力。
 - Codexの会話・進捗・成果物を表示。既存Codex会話の同期にはCodexアプリの起動が必要。
 - Markdown、CSV、テキストの閲覧・編集。下書き、外部変更の検知、保存前バックアップ。
 - HTML、PDF、画像、対応する音声・動画のプレビュー。
