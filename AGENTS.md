@@ -1,5 +1,7 @@
 # Atlas Browser development
 
+When resuming after context compaction, preserve the unfinished request and the latest Atlas follow-ups from the handoff summary. Atlas follow-ups can arrive as `codex_app.send_message_to_thread` delegation inputs rather than ordinary user-role messages. Do not revert to an older user-role question merely because it appears last in the retained transcript. If the active request is uncertain, inspect recent thread history before changing task scope.
+
 This is the user's personal Windows application. Keep Japanese UI text concise and preserve local user data and browser profiles.
 
 For executables, archives and large deliverables, include the containing folder as an absolute link and a copyable Windows path. Do not rely only on a file-preview link. Internal distribution work must stay local: do not push the pending internal installer changes or publish its artifacts without the user's request.

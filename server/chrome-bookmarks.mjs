@@ -5,17 +5,15 @@ import crypto from 'node:crypto';
 const idFor=value=>'chrome-'+crypto.createHash('sha256').update(value).digest('hex').slice(0,24);
 export function chromeTree(document,profile){
   const items=[],root=idFor(profile);
-  items.push({id:root,kind:'folder',title:profile==='Default'?'Chrome':'Chrome · '+profile,parentId:null,source:'chrome'});
   const visit=(node,parent,trail)=>{
     if(!node||typeof node!=='object')return;
     const id=idFor(profile+'/'+(node.id||trail));
     if(node.type==='folder'||Array.isArray(node.children)){
-      items.push({id,kind:'folder',title:String(node.name||'フォルダ').slice(0,200),parentId:parent,source:'chrome'});
       (node.children||[]).forEach((child,i)=>visit(child,id,trail+'/'+i));
     }else if(node.type==='url'){
       let url;try{url=new URL(node.url);}catch{return;}
       if(!['https:','http:'].includes(url.protocol)||url.username||url.password)return;
-      items.push({id,title:String(node.name||url.hostname).slice(0,200),url:url.href,parentId:parent,source:'chrome'});
+      items.push({id,title:String(node.name||url.hostname).slice(0,200),url:url.href,parentId:null,source:'chrome'});
     }
   };
   for(const [key,node] of Object.entries(document.roots||{}))visit(node,root,key);

@@ -24,6 +24,7 @@ export const shortcutDefinitions = [
   { command: "tab-9", group: "タブ", label: "最後のタブへ移動", keys: "Ctrl+9" },
   { command: "address", group: "Web", label: "アドレス・検索欄へ移動", keys: "Ctrl+L" },
   { command: "split", group: "ペイン", label: "ペインを追加", keys: "Ctrl+Backslash" },
+  { command: "zoom-pane", group: "ペイン", label: "ペインを拡大 / 元の分割に戻す", keys: "Ctrl+Shift+Enter" },
   { command: "close-pane", group: "ペイン", label: "選択中のペインを閉じる", keys: "Ctrl+Shift+W" },
   { command: "move-pane", group: "ペイン", label: "タブを次のペインへ移動", keys: "Ctrl+Alt+M" },
   { command: "focus-left", group: "ペイン", label: "前のペインへ移動", keys: "Ctrl+Alt+ArrowLeft" },

@@ -1,6 +1,7 @@
 import {setupVoice} from './voice-input.js';
 import {tabIcon,svgIcon} from './tab-icons.js';
 import {setupBookmarkFlyout} from './bookmark-flyout.js';
+import {bookmarkMarks,bookmarkMark,flatBookmarks} from './bookmark-marks.js';
 import {requestHTML,requestKey,readRequestForm} from './requests-ui.js';
 import {setupImagePaste} from './image-paste.js';
 import { marked } from "/vendor/marked.js";
@@ -1892,52 +1893,44 @@ function persistTabs() {
   );
 }
 function renderBookmarkState(){
-  const page=state.tabs.find(t=>t.id===state.activeTab),saved=(state.bookmarks||[]).some(b=>b.url===page?.url);
-  $('bookmark-page').textContent=saved?'★':'☆';$('bookmark-page').setAttribute('aria-pressed',String(saved));
+  const page=state.tabs.find(t=>t.id===state.activeTab),saved=flatBookmarks(state.bookmarks).find(b=>b.url===page?.url);
+  $('bookmark-page').textContent=saved?bookmarkMark(saved.mark).symbol:'☆';$('bookmark-page').setAttribute('aria-pressed',String(!!saved));
   $('bookmark-page').title=saved?'ブックマークを編集（Ctrl+D）':'ブックマーク（Ctrl+D）';
 }
-async function saveBookmark(data){state.bookmarks=await api('/bookmarks',data);renderBookmarkState();renderBookmarkList();}
-async function bookmarkPage(){
+async function saveBookmark(data){state.bookmarks=await api('/bookmarks',data);renderBookmarkState();renderBookmarkList();bookmarkFlyout?.refresh();}
+async function bookmarkPage(mark){
+  const selected=typeof mark==='string'?bookmarkMark(mark).id:null;
   const page=state.activeView?.startsWith('web:')&&state.tabs.find(t=>t.id===state.activeTab);
-  if(!page){const t=task();if(!t){toast('Webページか案件を開いてください');return;}await saveBookmark({kind:'task',taskId:t.id,title:t.title});toast('案件をブックマークしました');return;}
+  if(!page){const t=task();if(!t){toast('Webページか案件を開いてください');return;}await saveBookmark({kind:'task',taskId:t.id,title:t.title,mark:selected||'star',parentId:null});toast(bookmarkMark(selected).symbol+' に登録しました');return;}
   const existing=(state.bookmarks||[]).find(b=>b.url===page.url);
-  if(existing){editBookmarkDialog(existing);return;}
-  await saveBookmark({url:page.url,title:page.title});toast('ブックマークに追加しました');
+  if(existing&&!selected){editBookmarkDialog(existing);return;}
+  await saveBookmark({id:existing?.id,url:page.url,title:existing?.title||page.title,mark:selected||'star',parentId:null});toast(bookmarkMark(selected).symbol+' に登録しました');
 }
-let bookmarkFolder=null;
-function folderPath(id){
-  const parts=[],seen=new Set();
-  while(id&&!seen.has(id)){seen.add(id);const folder=(state.bookmarks||[]).find(b=>b.id===id&&b.kind==='folder');if(!folder)break;parts.unshift(folder.title);id=folder.parentId;}
-  return parts.join(' / ');
-}
+let bookmarkFilter='all';
 function renderBookmarkList(){
   if(!$('bookmark-results'))return;
-  const query=$('bookmark-search').value.trim().toLocaleLowerCase(),all=state.bookmarks||[];
-  if(bookmarkFolder&&!all.some(b=>b.id===bookmarkFolder&&b.kind==='folder'))bookmarkFolder=null;
-  $('bookmark-location').textContent=folderPath(bookmarkFolder)||'すべて';$('bookmark-up').disabled=!bookmarkFolder;
-  const found=all.filter(b=>query?(b.title+' '+(b.url||'')+' '+folderPath(b.parentId)).toLocaleLowerCase().includes(query):(b.parentId||null)===bookmarkFolder).sort((a,b)=>Number(b.kind==='folder')-Number(a.kind==='folder'));
-  $('bookmark-results').innerHTML=found.length?found.map(b=>`<div class="bookmark-row"><button class="bookmark-open" data-bookmark-open="${esc(b.id)}" title="${esc(b.url||folderPath(b.id))}"><strong>${b.kind==='folder'?'▸ ▱ ':''}${esc(b.title)}</strong><span>${esc(b.kind==='folder'?all.filter(x=>x.parentId===b.id).length+' 件':b.kind==='task'?'AIとの会話':b.url)}</span></button><button data-bookmark-edit="${esc(b.id)}" aria-label="${esc(b.title)}を編集">編集</button></div>`).join(''):`<div class="empty">${query?'見つかりませんでした':'まだ項目がありません'}</div>`;
+  const query=$('bookmark-search').value.trim().toLocaleLowerCase();
+  const found=flatBookmarks(state.bookmarks).filter(b=>(bookmarkFilter==='all'||bookmarkMark(b.mark).id===bookmarkFilter)&&(!query||(b.title+' '+(b.url||'')).toLocaleLowerCase().includes(query)));
+  for(const button of document.querySelectorAll('[data-bookmark-filter]'))button.setAttribute('aria-pressed',String(button.dataset.bookmarkFilter===bookmarkFilter));
+  $('bookmark-results').innerHTML=found.length?found.map(b=>`<div class="bookmark-row"><button class="bookmark-open" data-bookmark-open="${esc(b.id)}" title="${esc(b.url||b.title)}"><strong>${bookmarkMark(b.mark).symbol} ${esc(b.title)}</strong><span>${esc(b.kind==='task'?'AIとの会話':b.url)}</span></button><button data-bookmark-edit="${esc(b.id)}" aria-label="${esc(b.title)}を編集">編集</button></div>`).join(''):`<div class="empty">${query?'見つかりませんでした':'まだ項目がありません'}</div>`;
 }
-async function showBookmarks(){
-  $('app-menu').open=false;state.bookmarks=await api('/bookmarks');
-  openDialog(dialogHeader('ブックマーク')+'<div class="bookmark-toolbar"><button id="bookmark-up" aria-label="親フォルダーへ">←</button><button id="bookmark-root">すべて</button><span id="bookmark-location"></span><button id="bookmark-new-folder">＋ フォルダー</button><button id="bookmark-chrome">Chromeと同期</button></div><input id="bookmark-search" type="search" placeholder="名前・URLで検索" aria-label="ブックマークを検索" style="width:100%;margin:10px 0"><div id="bookmark-results"></div>');
-  $('bookmark-chrome').onclick=async()=>{const r=await api('/bookmarks/chrome',{enabled:true});state.bookmarks=await api('/bookmarks');renderBookmarkList();toast(r.profiles?r.count+' 件をChromeから同期しました':'このPCにChromeのブックマークがありません');};
+async function showBookmarks(mark){
+  $('app-menu').open=false;bookmarkFilter=bookmarkMarks.some(m=>m.id===mark)?mark:'all';state.bookmarks=await api('/bookmarks');
+  openDialog(dialogHeader('ブックマーク')+'<div class="bookmark-toolbar"><button data-bookmark-filter="all">すべて</button>'+bookmarkMarks.map(m=>'<button data-bookmark-filter="'+m.id+'" aria-label="'+m.name+'">'+m.symbol+'</button>').join('')+'<span class="spacer"></span><button id="bookmark-chrome">Chromeと同期</button></div><input id="bookmark-search" type="search" placeholder="名前・URLで検索" aria-label="ブックマークを検索" style="width:100%;margin:10px 0"><div id="bookmark-results"></div>');
+  $('bookmark-chrome').onclick=async()=>{const r=await api('/bookmarks/chrome',{enabled:true});state.bookmarks=await api('/bookmarks');renderBookmarkList();bookmarkFlyout.refresh();toast(r.profiles?flatBookmarks(state.bookmarks).length+' 件を同期しました':'このPCにChromeのブックマークがありません');};
   $('bookmark-search').oninput=renderBookmarkList;
-  $('bookmark-up').onclick=()=>{bookmarkFolder=state.bookmarks.find(b=>b.id===bookmarkFolder)?.parentId||null;renderBookmarkList();};
-  $('bookmark-root').onclick=()=>{bookmarkFolder=null;$('bookmark-search').value='';renderBookmarkList();};
-  $('bookmark-new-folder').onclick=()=>editBookmarkDialog({kind:'folder',title:'',parentId:bookmarkFolder});
-  $('bookmark-results').onclick=event=>{const open=event.target.closest('[data-bookmark-open]'),edit=event.target.closest('[data-bookmark-edit]'),id=open?.dataset.bookmarkOpen||edit?.dataset.bookmarkEdit,b=(state.bookmarks||[]).find(b=>b.id===id);if(!b)return;if(edit)editBookmarkDialog(b);else if(b.kind==='folder'){bookmarkFolder=b.id;$('bookmark-search').value='';renderBookmarkList();}else{closeDialog();openBookmark(b).catch(e=>toast(e.message));}};
+  for(const b of document.querySelectorAll('[data-bookmark-filter]'))b.onclick=()=>{bookmarkFilter=b.dataset.bookmarkFilter;renderBookmarkList();};
+  $('bookmark-results').onclick=event=>{const open=event.target.closest('[data-bookmark-open]'),edit=event.target.closest('[data-bookmark-edit]'),id=open?.dataset.bookmarkOpen||edit?.dataset.bookmarkEdit,b=(state.bookmarks||[]).find(b=>b.id===id);if(!b)return;if(edit)editBookmarkDialog(b);else{closeDialog();openBookmark(b).catch(e=>toast(e.message));}};
   renderBookmarkList();$('bookmark-search').focus();
 }
 function editBookmarkDialog(bookmark){
-  const folder=bookmark.kind==='folder',choices=(state.bookmarks||[]).filter(b=>b.kind==='folder'&&b.id!==bookmark.id);
-  openDialog(dialogHeader(folder?'フォルダー':'ブックマークを編集')+`<div class="bookmark-edit"><label for="bookmark-title">名前</label><input id="bookmark-title" value="${esc(bookmark.title)}">${folder||bookmark.kind==='task'?'':`<label for="bookmark-url">URL</label><input id="bookmark-url" value="${esc(bookmark.url)}">`}<label for="bookmark-folder">保存先</label><select id="bookmark-folder"><option value="">すべて</option>${choices.map(f=>`<option value="${esc(f.id)}" ${bookmark.parentId===f.id?'selected':''}>${esc(folderPath(f.id))}</option>`).join('')}</select></div><p id="bookmark-error" class="request-error" role="alert"></p><div class="dialog-actions"><button id="bookmark-remove" ${bookmark.id?'':'hidden'}>削除</button><span class="spacer"></span><button id="bookmark-cancel">キャンセル</button><button id="bookmark-save" class="primary">保存</button></div>`);
-  const submit=async remove=>{try{await saveBookmark(remove?{id:bookmark.id,remove:true}:{id:bookmark.id,kind:bookmark.kind,title:$('bookmark-title').value,url:$('bookmark-url')?.value,parentId:$('bookmark-folder').value});await showBookmarks();}catch(e){$('bookmark-error').textContent=e.message;}};
+  openDialog(dialogHeader('ブックマークを編集')+`<div class="bookmark-edit"><label for="bookmark-title">名前</label><input id="bookmark-title" value="${esc(bookmark.title)}">${bookmark.kind==='task'?'':`<label for="bookmark-url">URL</label><input id="bookmark-url" value="${esc(bookmark.url)}">`}<label for="bookmark-mark">マーク</label><select id="bookmark-mark">${bookmarkMarks.map(m=>`<option value="${m.id}" ${bookmarkMark(bookmark.mark).id===m.id?'selected':''}>${m.symbol} ${m.name}</option>`).join('')}</select></div><p id="bookmark-error" class="request-error" role="alert"></p><div class="dialog-actions"><button id="bookmark-remove">削除</button><span class="spacer"></span><button id="bookmark-cancel">キャンセル</button><button id="bookmark-save" class="primary">保存</button></div>`);
+  const submit=async remove=>{try{const mark=$('bookmark-mark').value;await saveBookmark(remove?{id:bookmark.id,remove:true}:{id:bookmark.id,kind:bookmark.kind,taskId:bookmark.taskId,title:$('bookmark-title').value,url:$('bookmark-url')?.value,mark,parentId:null});await showBookmarks(remove?bookmarkFilter:mark);}catch(e){$('bookmark-error').textContent=e.message;}};
   $('bookmark-save').onclick=()=>submit(false);$('bookmark-remove').onclick=()=>submit(true);$('bookmark-cancel').onclick=()=>showBookmarks().catch(e=>toast(e.message));
 }
 action('bookmark-page',bookmarkPage);action('show-bookmarks',showBookmarks);action('menu-bookmarks',showBookmarks);
 async function openBookmark(b){if(b.kind==='task'){await selectTask(b.taskId);return;}await openWeb(b.url);}
-const bookmarkFlyout=setupBookmarkFlyout({state,api,open:openBookmark,manage:showBookmarks,layout:syncBrowserLayout,esc,error:toast});
+const bookmarkFlyout=setupBookmarkFlyout({state,api,open:openBookmark,manage:showBookmarks,layout:syncBrowserLayout,esc,error:toast,saveCurrent:bookmarkPage});
 $('new-note').querySelector('span').innerHTML=svgIcon('note');$('open-web-home').querySelector('span').innerHTML=tabIcon({kind:'web'},null,esc);$('open-files-home').querySelector('span').innerHTML=svgIcon('folder');
 const newTaskShortcut=document.createElement('button');newTaskShortcut.id='new-task-tab';newTaskShortcut.title='新しい案件';newTaskShortcut.innerHTML=tabIcon({kind:'task'},null,esc)+'<span class="rail-label">新しい案件</span>';newTaskShortcut.onclick=()=>newTask().catch(e=>toast(e.message));document.querySelector('.tab-actions').append(newTaskShortcut);
 const pageTranslation=setupPageTranslation({host,api,state,save:prefs,toast,openWeb});
@@ -2213,7 +2206,7 @@ async function runShortcut(command, sourceId = null) {
   if(command==='new-window')return host('window.new');
   command = ({ "next-tab-page": "next-tab", "previous-tab-page": "previous-tab" })[command] || command;
   if (paneMode && command === "send") { $("composer").requestSubmit(); return; }
-  if(paneMode && ['split','close-pane','move-pane','focus-left','focus-right','sidebar','shortcuts'].includes(command)){paneShell.shortcut(command);return;}
+  if(paneMode && ['split','zoom-pane','close-pane','move-pane','focus-left','focus-right','sidebar','shortcuts'].includes(command)){paneShell.shortcut(command);return;}
   if (command === "shortcuts") {
     if ($("dialog").open && $("dialog").querySelector(".shortcut-editor")) closeDialog();
     else if (!$("dialog").open) showShortcuts();
@@ -2256,6 +2249,8 @@ async function runShortcut(command, sourceId = null) {
     if (native) await host("window.focusUI");
     $("address").value = state.tabs.find((t) => t.id === state.activeTab)?.url || "";
     $("address").focus(); $("address").select();
+  } else if (command === "zoom-pane") {
+    return paneShell.zoom();
   } else if (command === "split") {
     return paneShell.toggle();
   } else if (command === "close-pane") {

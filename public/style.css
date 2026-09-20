@@ -48,6 +48,9 @@
 .pane-resizer[data-axis="columns"] {cursor:col-resize;width:8px;top:0;bottom:0}
 .pane-resizer[data-axis="rows"] {cursor:row-resize;height:8px;left:0;right:0}
 .pane-resizer:hover,.pane-resizer:focus {background:var(--accent);outline:0}
+#workspace-deck>.pane-zoom-target {position:absolute;inset:0;grid-area:1 / 1 / -1 / -1!important;width:100%;height:100%;z-index:2}
+#workspace-deck>.pane-zoom-hidden {visibility:hidden;pointer-events:none}
+#workspace-deck.pane-zoomed>.pane-resizer {display:none}
 .pane-drop-layer {position:absolute;inset:0;z-index:20;pointer-events:none}
 .pane-drop-zone {position:absolute;pointer-events:none;background:color-mix(in srgb,var(--bg) 55%,transparent);border:2px dashed var(--accent);box-sizing:border-box}
 .pane-drop-zone.over {background:color-mix(in srgb,var(--accent) 22%,transparent);border-style:solid}
@@ -1672,6 +1675,8 @@ dialog { background: var(--surface); border-color: color-mix(in srgb, var(--acce
 #tab-rail-toggle {display:flex;align-items:center;gap:12px;flex-shrink:0;border:0;min-height:36px;padding:6px 10px;text-align:left;white-space:nowrap}
 #tab-count {color:var(--muted);font-weight:400;margin-left:8px}
 #rail-bookmarks {display:flex;gap:10px;align-items:center;flex-shrink:0;min-height:36px;padding:6px 10px;text-align:left;white-space:nowrap;color:var(--accent-ink,var(--accent))}
+.bookmark-category-trigger {display:flex;gap:10px;align-items:center;flex-shrink:0;min-height:34px;padding:5px 10px;text-align:left;white-space:nowrap;color:var(--accent-ink,var(--accent));border:0}
+.bookmark-category-trigger>span:first-child {width:16px;text-align:center}
 .bookmark-toolbar {display:flex;align-items:center;gap:8px;margin-top:12px}
 #bookmark-location {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 #bookmark-folder {width:100%}
@@ -1701,7 +1706,13 @@ dialog { background: var(--surface); border-color: color-mix(in srgb, var(--acce
 .provider-openai{background:currentColor;mask:url('/assets/chatgpt.svg') center/contain no-repeat}
 .connection-section{padding:12px 0;border-bottom:1px solid var(--line)}.connection-key{display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:center;margin:16px 0}.connection-key small{grid-column:2;color:var(--muted)}
 #voice-input.recording{background:#bc344e;color:#fff}#voice-provider{max-width:100px;font-size:11px}
-#bookmark-flyout{position:fixed;z-index:80;display:flex;align-items:stretch;overflow:auto;gap:1px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:0 12px 35px #0005;padding:5px}
+#bookmark-flyout{position:fixed;z-index:80;display:flex;flex-direction:column;align-items:stretch;width:290px;overflow:hidden;gap:5px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:0 12px 35px #0005;padding:8px}
+#bookmark-flyout .bookmark-column{width:auto;min-height:32px;flex:1;overflow-y:auto}
+.bookmark-flyout-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.bookmark-flyout-heading strong{font-size:13px;font-weight:500}.bookmark-flyout-heading button,.bookmark-manage{font-size:12px}
+.bookmark-quick-search{width:100%;box-sizing:border-box;flex-shrink:0;padding:6px 9px}
+#bookmark-save-palette{position:fixed;z-index:85;display:flex;gap:5px;padding:7px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px #0004}
+#bookmark-save-palette[hidden]{display:none}#bookmark-save-palette button{font-size:20px;color:var(--accent-ink,var(--accent));padding:7px 12px}
 #bookmark-flyout[hidden]{display:none}.bookmark-column{width:222px;min-width:180px;overflow:auto;max-height:inherit;padding:3px;scrollbar-width:thin}
 .bookmark-column button{display:flex;align-items:center;gap:9px;width:100%;border:0;min-height:34px;padding:7px;text-align:left;white-space:nowrap}.bookmark-column button span{overflow:hidden;text-overflow:ellipsis;flex:1}.bookmark-column button:hover,.bookmark-column button:focus-visible{background:var(--surface2)}
 .bookmark-column .bookmark-manage{font-size:11px;color:var(--muted);margin-top:10px;border-top:1px solid var(--line)}

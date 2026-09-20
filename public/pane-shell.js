@@ -47,7 +47,7 @@ export function setupPanes(api) {
   $('workspace-divider').remove();
   $('secondary-slot').remove();
   const panes=new Map(),pending=new Map();
-  let active='primary',primaryLayout={},layout='auto',ratio=50,restoring=false,serial=0;
+  let active='primary',zoomed=null,primaryLayout={},layout='auto',ratio=50,restoring=false,serial=0;
   const send=(p,data)=>p.frame.contentWindow?.postMessage({channel,...data},location.origin);
   const rpc=(p,type,data={})=>new Promise((resolve,reject)=>{
     const id=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(id);reject(new Error('ペインの応答がありません'));},15000);
@@ -61,8 +61,9 @@ export function setupPanes(api) {
   function remember(){if(!restoring)api.rememberLayout(compact());}
   function flushLayout(){
     const hidden=$('work-view').hidden||$('dialog').open||deck.classList.contains('dragging');
-    const all=hidden?[]:[...(primaryLayout.visible?primaryLayout.panes||[]:[])];
+    const all=hidden||zoomed&&zoomed!=='primary'?[]:[...(primaryLayout.visible?primaryLayout.panes||[]:[])];
     if(!hidden)for(const p of panes.values()){
+      if(zoomed&&zoomed!==p.id)continue;
       const r=p.frame.getBoundingClientRect();
       if(p.browserLayout?.visible)for(const b of p.browserLayout.panes||[])all.push({...b,id:p.id+':'+b.id,x:b.x+r.x,y:b.y+r.y});
     }
@@ -71,6 +72,12 @@ export function setupPanes(api) {
   function render(){
     const count=panes.size+1,{columns}=resize.render(layout,count);
     deck.classList.toggle('is-split',count>1);
+    deck.classList.toggle('pane-zoomed',!!zoomed);
+    for(const [id,slot] of [['primary',primary],...[...panes.values()].map(p=>[p.id,p.slot])]){
+      slot.classList.toggle('pane-zoom-target',zoomed===id);
+      slot.classList.toggle('pane-zoom-hidden',!!zoomed&&zoomed!==id);
+      slot.inert=!!zoomed&&zoomed!==id;
+    }
     primary.style.gridColumn='1';primary.style.gridRow='1';
     let i=0;for(const p of panes.values()){i++;p.slot.style.gridColumn=String(i%columns+1);p.slot.style.gridRow=String(Math.floor(i/columns)+1);p.frame.title='ペイン '+(i+1);p.slot.classList.toggle('focused',active===p.id);}
     primary.classList.toggle('focused',active==='primary');$('pane-close').disabled=!panes.size;$('pane-swap').hidden=!panes.size;$('pane-layout').value=layout;flushLayout();
@@ -87,16 +94,18 @@ export function setupPanes(api) {
     remember();return p;
   }
   async function add(view){
+    zoomed=null;
     if(!view)view=active==='primary'?api.describe(api.current()):current(panes.get(active));
     const p=await mount(view?{views:[view],tabs:view.tab?[view.tab]:[],activeView:view.key}:null);
     active=p.id;render();remember();await focusId(p.id);
   }
   async function focusId(id){
-    active=panes.has(id)?id:'primary';render();if(active==='primary')return api.focus();
+    active=panes.has(id)?id:'primary';if(zoomed)zoomed=active;render();relayout();if(active==='primary')return api.focus();
     const p=panes.get(active);paneBridge?.postMessage({action:'window.focusUI'});p.frame.focus();if(p.ready)await rpc(p,'focus');
   }
   async function focus(side){const ids=['primary',...panes.keys()],i=ids.indexOf(active);await focusId(ids[(i+(side==='right'?1:-1)+ids.length)%ids.length]);}
   async function closePane(){
+    zoomed=null;
     if(active==='primary'&&panes.size){await swap();active=panes.keys().next().value;}
     const p=panes.get(active);if(!p)return;if(p.ready)await rpc(p,'flush');
     for(const t of p.snapshot?.tabs||[])paneBridge?.postMessage({action:'browser.close',id:p.id+':'+t.id});
@@ -122,9 +131,11 @@ export function setupPanes(api) {
     const view=active==='primary'?api.current():current(panes.get(active));if(view)await transfer(active,ids[(ids.indexOf(active)+1)%ids.length],view.key);
   }
   async function command(name){
+    if(name==='zoom-pane')return zoom();
     if(name==='split')return add();if(name==='close-pane')return closePane();if(name==='move-pane')return moveCurrent();
     if(name==='focus-left'||name==='focus-right')return focus(name==='focus-right'?'right':'left');return api.shortcut(name);
   }
+  async function zoom(){if(!panes.size)return;zoomed=zoomed?null:active;render();relayout();await focusId(active);}
   window.addEventListener('message',async e=>{
     if(e.origin!==location.origin||e.data?.channel!==channel)return;
     const p=[...panes.values()].find(p=>e.source===p.frame.contentWindow);if(!p)return;const m=e.data;
@@ -151,7 +162,7 @@ export function setupPanes(api) {
   $('pane-layout').onchange=e=>{layout=e.target.value;render();remember();relayout();};
   new ResizeObserver(relayout).observe(deck);render();
   return {
-    toggle:add,choose:add,focus,swap,closePane,moveCurrent,render,selected:()=>null,close:async()=>{},
+    toggle:add,choose:add,zoom,focus,swap,closePane,moveCurrent,render,selected:()=>null,close:async()=>{},
     async twoPanes(){
       if(!panes.size)await mount({views:[],tabs:[],activeView:null});
       await Promise.all([...panes.values()].map(p=>Promise.race([p.readyPromise,new Promise((_,reject)=>setTimeout(()=>reject(new Error('ペインの起動を待っています')),20000))])));

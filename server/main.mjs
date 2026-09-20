@@ -793,7 +793,9 @@ const server = http.createServer(async (req, res) => {
         if(req.method==='GET'){if(store.data.chromeSync===true){const r=await chromeBookmarks.sync();if(r.changed)emit('bookmarks',store.data.bookmarks);}return json(res,store.data.bookmarks);}
         if(req.method!=='POST')fail('Method not allowed',405);
         if(b.kind==='task')store.task(b.taskId);
-        const existing=store.data.bookmarks.find(x=>x.id===b.id);const edited=editBookmark(store.data.bookmarks,b);if(existing?.source==='chrome'&&b.remove){store.data.chromeBookmarkHidden||=[];store.data.chromeBookmarkHidden.push(existing.id);}if(existing?.source==='chrome'&&edited){edited.source='chrome';edited.chromeProfile=existing.chromeProfile;edited.chromeEdited=true;}
+        const before=[...store.data.bookmarks],existing=before.find(x=>x.id===b.id);const edited=editBookmark(store.data.bookmarks,b);
+        if(b.remove){const remaining=new Set(store.data.bookmarks.map(x=>x.id));store.data.chromeBookmarkHidden=[...new Set([...(store.data.chromeBookmarkHidden||[]),...before.filter(x=>x.source==='chrome'&&!remaining.has(x.id)).map(x=>x.id)])];}
+        if(existing?.source==='chrome'&&edited){edited.source='chrome';edited.chromeProfile=existing.chromeProfile;edited.chromeEdited=true;}
         store.flush();emit('bookmarks',store.data.bookmarks);return json(res,store.data.bookmarks);
       }
       if(pathname==='/api/bookmarks/chrome'&&req.method==='POST'){

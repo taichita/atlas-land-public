@@ -25,6 +25,8 @@ test('Chrome sync is idempotent, read-only, retains local edits and ignores unsa
  try{
   await fs.writeFile(file,JSON.stringify(doc));assert((await sync.sync(true)).changed);
   assert.equal(store.data.bookmarks.filter(b=>b.url).length,2);assert(!(await sync.sync(true)).changed);
+  assert(!store.data.bookmarks.some(b=>b.kind==='folder'));
+  assert(store.data.bookmarks.every(b=>!b.parentId));
   const item=store.data.bookmarks.find(b=>b.title==='Example');item.chromeEdited=true;item.title='自分の名前';
   doc.roots.bookmark_bar.children[0].name='Upstream change';await fs.writeFile(file,JSON.stringify(doc));await sync.sync(true);
   assert.equal(store.data.bookmarks.find(b=>b.id===item.id).title,'自分の名前');
