@@ -202,7 +202,7 @@ function syncShortcutSettings() {
   if ($("composer-note"))
     $("composer-note").textContent = bindings.send ? `${displayShortcut(bindings.send)} で送信` : "送信ボタンで送信";
 }
-function markdown(text) {
+function markdown(text, copyable = false) {
   const html=DOMPurify.sanitize(marked.parse(text || "", { breaks: false }), {
     FORBID_TAGS: [
       "img",
@@ -217,6 +217,12 @@ function markdown(text) {
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|file):|[a-z]:[\\/]|[^a-z]|[a-z+.-]+(?:[^a-z+.:\-]|$))/i,
   });
   const content=document.createElement('div');content.innerHTML=html;
+  if(copyable)for(const pre of content.querySelectorAll('pre')){
+    if(!pre.querySelector('code'))continue;
+    const block=document.createElement('div'),button=document.createElement('button');
+    block.className='copyable-code';button.type='button';button.dataset.copyCode='';button.textContent='コピー';button.setAttribute('aria-label','コード・プロンプトをコピー');
+    pre.replaceWith(block);block.append(button,pre);
+  }
   for(const a of content.querySelectorAll('a[href]')){
     const target=fileLink(a.getAttribute('href'));
     if(!target||target.web||target.anchor!==undefined)continue;
@@ -656,7 +662,7 @@ function itemHTML(i) {
     ).replaceAll("\n", "<br>")}${(i.content||[]).filter(c=>c.type==='image'||c.type==='localImage').map(c=>safeImage(c.url)?imageThumb(c.url,c.name||'添付画像'):'<span class="attachment">添付画像</span>').join('')}</div></article>`;
   }
   if (i.type === "agentMessage") {
-    return `<article class="message" data-item="${esc(i.id)}"><div class="message-label">AI <span class="muted">${i.phase === "commentary" ? "進捗" : ""}</span></div><div class="message-body">${markdown(i.text)}</div></article>`;
+    return `<article class="message" data-item="${esc(i.id)}"><div class="message-label">AI <span class="muted">${i.phase === "commentary" ? "進捗" : ""}</span><button class="copy-message" data-copy-message="${esc(i.id)}" aria-label="回答全文をコピー">コピー</button></div><div class="message-body">${markdown(i.text,true)}</div></article>`;
   }
   if (i.type === "plan") {
     return `<article class="message"><div class="message-label">作業計画</div><div class="message-body">${markdown(i.text)}</div></article>`;
@@ -728,6 +734,11 @@ function renderConversation() {
 }
 $("conversation").addEventListener("click", async (e) => {
   try {
+    const code=e.target.closest('button[data-copy-code]'),message=e.target.closest('button[data-copy-message]');
+    if(code||message){
+      const text=code?code.closest('.copyable-code').querySelector('code').textContent:allItems(state.histories.get(state.active)).find(i=>i.id===message.dataset.copyMessage)?.text;
+      if(typeof text==='string'){await navigator.clipboard.writeText(text);toast('コピーしました');}return;
+    }
     if (e.target.id === "refresh-conversation") await loadHistory(state.active);
     if (e.target.id === "load-older")
       await loadHistory(

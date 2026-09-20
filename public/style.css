@@ -512,6 +512,10 @@ main,
   margin-bottom: 28px;
   overflow-wrap: anywhere;
 }
+.copyable-code {position:relative;margin:12px 0;padding-top:32px;background:var(--surface2);border-radius:8px;overflow:hidden}
+.copyable-code>button {position:absolute;right:6px;top:4px;padding:3px 9px;font-size:12px}
+.copyable-code>pre {margin:0!important}
+.message-label>.copy-message {margin-left:auto;padding:2px 8px;font-size:11px;line-height:1.5;color:var(--muted)}
 .message-label {
   display: flex;
   gap: 10px;

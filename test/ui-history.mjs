@@ -51,7 +51,15 @@ try {
   await page.reload();
   await page.locator('#conversation .message').first().waitFor();
   assert.equal(await page.locator('#conversation .message').count(),24);
-  console.log('History UI: no replay after 12 turns, older-page order and reload passed.');
+  const prompt='日本語のプロンプト\n<literal> & "quotes"\n改行も保持';
+  turns.at(-1).items[1].text='説明文\n\n```text\n'+prompt+'\n```\n\n補足';
+  await page.context().grantPermissions(['clipboard-read','clipboard-write'],{origin:new URL(ready.url).origin});
+  await page.reload();await page.locator('[data-copy-code]').waitFor();
+  await page.locator('[data-copy-code]').click();
+  assert.equal((await page.evaluate(()=>navigator.clipboard.readText())).replaceAll('\r\n','\n'),prompt+'\n');
+  await page.locator('[data-copy-message="a-16"]').click();
+  assert.equal((await page.evaluate(()=>navigator.clipboard.readText())).replaceAll('\r\n','\n'),turns.at(-1).items[1].text);
+  console.log('History UI: no replay, chronology and reload; prompt-only and full-answer clipboard contents passed.');
 } finally {
   await browser.close(); child.kill();
 }
