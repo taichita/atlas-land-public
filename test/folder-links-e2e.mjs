@@ -16,5 +16,8 @@ try{
  await page.getByRole('link',{name:'セットアップ',exact:true}).click();
  await page.waitForFunction(()=>__hosts.filter(m=>m.action==='file.reveal').length===2);
  assert.deepEqual(await page.evaluate(()=>__hosts.filter(m=>m.action==='file.reveal').map(m=>m.path)),[ready.data,ready.data]);
+ await page.route('**/api/local/open',route=>route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'ファイルを選んでください'})}));
+ await page.getByRole('link',{name:'親フォルダ',exact:true}).click();await page.waitForFunction(()=>__hosts.filter(m=>m.action==='file.reveal').length===3);
+ assert.equal((await page.evaluate(()=>__hosts.filter(m=>m.action==='file.reveal').at(-1).path)).replaceAll('\\','/'),ready.data.replaceAll('\\','/'));
  console.log('PASS: folder and 54MB executable links reveal the containing folder without opening an editor or executing the binary.');
 }catch(e){console.log(await page.locator('body').innerText());throw e;}finally{await browser.close();const url=new URL(ready.url);await fetch(url.origin+'/api/shutdown',{method:'POST',headers:{'x-workspace-token':url.hash.slice(1)}}).catch(()=>{});child.kill();}

@@ -1,11 +1,17 @@
-export function setupPageTranslation({host,api,state,save,toast}){
+import {googleTranslationURL} from './translation-url.js';
+export function setupPageTranslation({host,api,state,save,toast,openWeb}){
   const $=id=>document.getElementById(id),jobs=new Map(),counts=new Map(),translated=new Set(),muted=new Set(),again=new Set();
   const origin=id=>{try{return new URL(state.tabs.find(t=>t.id===id)?.url).origin;}catch{return null;}};
-  const enabled=id=>!!origin(id)&&(state.ui.translationOrigins||[]).includes(origin(id));
+  const provider=()=>state.ui.translationProvider==='codex'?'codex':'google';
+  const enabled=id=>provider()==='codex'&&!!origin(id)&&(state.ui.translationOrigins||[]).includes(origin(id));
   const message=(id,text)=>{if(state.activeTab===id)$('browser-message').textContent=text;};
-  function render(){const id=state.activeTab;$('translate-auto').checked=enabled(id);$('translate-page').disabled=!id||jobs.has(id);$('translate-page').textContent=jobs.has(id)?'翻訳中…':'日本語訳';$('translate-original').hidden=!translated.has(id)&&!jobs.has(id);}
+  function render(){const id=state.activeTab;$('translate-provider').value=provider();$('translate-auto').disabled=provider()!=='codex';$('translate-auto').checked=enabled(id);$('translate-page').title=provider()==='google'?'Google翻訳で公開ページを別タブに表示':'Codexでこのページ内を翻訳';$('translate-page').disabled=!id||jobs.has(id);$('translate-page').textContent=jobs.has(id)?'翻訳中…':'日本語訳';$('translate-original').hidden=!translated.has(id)&&!jobs.has(id);}
   async function translate(id=state.activeTab,automatic=false){
     if(!id||jobs.has(id)||automatic&&(!enabled(id)||muted.has(id)||counts.get(id)>=10))return;
+    if(provider()==='google'){
+      if(automatic)return;
+      try{await openWeb(googleTranslationURL(state.tabs.find(t=>t.id===id)?.url));}catch(e){toast(e.message);}return;
+    }
     const job={};jobs.set(id,job);render();
     try{
       await host('browser.translation',{id,mode:'auto',payload:enabled(id)});
@@ -21,6 +27,12 @@ export function setupPageTranslation({host,api,state,save,toast}){
     finally{jobs.delete(id);render();if(again.delete(id))translate(id,true);}
   }
   $('translate-page').onclick=()=>{muted.delete(state.activeTab);translate();};
+  $('translate-provider').onchange=()=>{
+    state.ui.translationProvider=$('translate-provider').value;save();again.clear();
+    for(const job of jobs.values())job.cancelled=true;
+    for(const tab of state.tabs)host('browser.translation',{id:tab.id,mode:'auto',payload:enabled(tab.id)}).catch(()=>{});
+    render();
+  };
   $('translate-auto').onchange=()=>{
     const id=state.activeTab,site=origin(id);if(!site)return;
     const origins=new Set(state.ui.translationOrigins||[]);if($('translate-auto').checked)origins.add(site);else origins.delete(site);

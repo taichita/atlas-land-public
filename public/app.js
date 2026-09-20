@@ -1552,7 +1552,8 @@ async function openFile(relative, encoding) {
         closeDialog();
         openFile(relative, "shift_jis").catch((e) => toast(e.message));
       });
-    } else throw e;
+    } else if(/ファイルを選|編集できるテキストは2MB|バイナリファイルは文章/.test(e.message))return revealLocal(localPath(relative));
+    else throw e;
   }
 }
 async function openLocalFile() {
@@ -1617,7 +1618,8 @@ async function loadLocalPath(selected, encoding) {
         closeDialog();
         loadLocalPath(selected,'shift_jis').catch(x=>toast(x.message));
       });
-    } else throw e;
+    } else if(/ファイルを選|編集できるテキストは2MB|バイナリファイルは文章/.test(e.message))return revealLocal(selected);
+    else throw e;
   }
 }
 action("open-local-file", () => openLocalFile());
@@ -1938,7 +1940,7 @@ async function openBookmark(b){if(b.kind==='task'){await selectTask(b.taskId);re
 const bookmarkFlyout=setupBookmarkFlyout({state,api,open:openBookmark,manage:showBookmarks,layout:syncBrowserLayout,esc,error:toast});
 $('new-note').querySelector('span').innerHTML=svgIcon('note');$('open-web-home').querySelector('span').innerHTML=tabIcon({kind:'web'},null,esc);$('open-files-home').querySelector('span').innerHTML=svgIcon('folder');
 const newTaskShortcut=document.createElement('button');newTaskShortcut.id='new-task-tab';newTaskShortcut.title='新しい案件';newTaskShortcut.innerHTML=tabIcon({kind:'task'},null,esc)+'<span class="rail-label">新しい案件</span>';newTaskShortcut.onclick=()=>newTask().catch(e=>toast(e.message));document.querySelector('.tab-actions').append(newTaskShortcut);
-const pageTranslation=setupPageTranslation({host,api,state,save:prefs,toast});
+const pageTranslation=setupPageTranslation({host,api,state,save:prefs,toast,openWeb});
 function normalizeURL(value) {
   value = value.trim();
   if (/^https?:\/\//i.test(value)) return new URL(value).href;
