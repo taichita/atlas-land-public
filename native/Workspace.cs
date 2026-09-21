@@ -27,6 +27,13 @@ class Workspace : Form {
  static readonly string profile=Environment.GetEnvironmentVariable("ATLAS_PROFILE")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"PersonalAIWorkspace");
  static string InstanceSuffix(){if(Environment.GetEnvironmentVariable("ATLAS_PROFILE")==null)return "";using(var hash=System.Security.Cryptography.SHA256.Create())return "-"+BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(Path.GetFullPath(profile).ToLowerInvariant()))).Replace("-","").Substring(0,16);}
  static Process backend; static string origin,token; static Task<string> serviceReady; static Session session;
+ static readonly string serviceFile=Path.Combine(profile,"backend-session.json");
+ public class ServiceRecord {public int Pid;public string StartedUtc;public string Executable;public string Root;public string Url;}
+ static ServiceRecord ReadService(){try{if(!File.Exists(serviceFile))return null;var r=new JavaScriptSerializer().Deserialize<ServiceRecord>(File.ReadAllText(serviceFile));if(r==null||!String.Equals(r.Root,appDir,StringComparison.OrdinalIgnoreCase))return null;return r;}catch{return null;}}
+ static Process FindService(ServiceRecord r){if(r==null)return null;try{var p=Process.GetProcessById(r.Pid);if(p.HasExited||p.StartTime.ToUniversalTime().ToString("o")!=r.StartedUtc||!String.Equals(p.MainModule.FileName,r.Executable,StringComparison.OrdinalIgnoreCase))return null;return p;}catch{return null;}}
+ static void SetServiceUrl(string url){var uri=new Uri(url);string secret=uri.Fragment.TrimStart('#');if(uri.Scheme!="http"||uri.Host!="127.0.0.1"||uri.AbsolutePath!="/"||uri.Query!=""||uri.UserInfo!=""||!System.Text.RegularExpressions.Regex.IsMatch(secret,"\\A[a-f0-9]{64}\\z"))throw new Exception("バックエンドの接続情報を確認できませんでした");origin=uri.GetLeftPart(UriPartial.Authority);token=secret;}
+ static void RecordService(string url){var r=new ServiceRecord{Pid=backend.Id,StartedUtc=backend.StartTime.ToUniversalTime().ToString("o"),Executable=backend.MainModule.FileName,Root=appDir,Url=url};string temp=serviceFile+".tmp";File.WriteAllText(temp,new JavaScriptSerializer().Serialize(r));if(File.Exists(serviceFile))File.Replace(temp,serviceFile,null);else File.Move(temp,serviceFile);}
+ static void ObserveService(Process process){process.Exited+=(s,e)=>{try{Lifecycle("backend.exit pid="+process.Id+" code="+process.ExitCode);}catch{}};process.EnableRaisingEvents=true;}
  readonly string windowId; bool uiReady,prepareTwo,disposedViews;
  readonly Stopwatch startupClock=Stopwatch.StartNew(); WebView2 ui; CoreWebView2Environment browsing; string activePage; Rectangle pageBounds; readonly Dictionary<string,Rectangle> browserBounds=new Dictionary<string,Rectangle>(); bool browserVisible=false,exiting=false; int running=0; NotifyIcon tray;
  [STAThread] static void Main(){bool created;using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AtlasLandNewWindow"+InstanceSuffix()))using(var mutex=new Mutex(true,"Local\\PersonalAIWorkspaceDesktop"+InstanceSuffix(),out created)){
@@ -49,14 +56,19 @@ class Workspace : Form {
  void Restore(){Show();WindowState=FormWindowState.Normal;Activate();tray.Visible=false;LayoutPage();}
  static async Task<string> StartService(){
   Directory.CreateDirectory(profile);
+  var saved=ReadService();var existing=FindService(saved);
+  if(existing!=null){
+   try{SetServiceUrl(saved.Url);using(var client=new System.Net.Http.HttpClient()){client.Timeout=TimeSpan.FromSeconds(5);client.DefaultRequestHeaders.Add("x-workspace-token",token);var response=await client.GetAsync(origin+"/api/metrics");response.EnsureSuccessStatusCode();}backend=existing;ObserveService(existing);Lifecycle("backend.reattach pid="+existing.Id);return saved.Url;}
+   catch{throw new Exception("実行中のバックエンドへの再接続を待っています。作業は停止せず、復元から再試行できます。");}
+  }
   string node=Environment.GetEnvironmentVariable("AI_WORKSPACE_NODE");if(String.IsNullOrEmpty(node)){node=Path.Combine(appDir,"runtime","node.exe");if(!File.Exists(node))node=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"nodejs","node.exe");}if(!File.Exists(node))throw new Exception("Node.js が見つかりません。セットアップを再実行してください。");
   var info=new ProcessStartInfo(node,"\""+Path.Combine(appDir,"server","main.mjs")+"\""){WorkingDirectory=appDir,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
   info.EnvironmentVariables["ATLAS_FRESH_SESSION"]=Environment.GetCommandLineArgs().Contains("--restore")?"0":"1";
   if(Environment.GetEnvironmentVariable("AI_WORKSPACE_DATA")==null)info.EnvironmentVariables["AI_WORKSPACE_DATA"]=Path.Combine(profile,"data");
   if(Environment.GetEnvironmentVariable("ATLAS_PROFILE")==null&&!File.Exists(Path.Combine(appDir,"installation.json")))info.EnvironmentVariables["ATLAS_CHROME_SYNC"]="1";
-  backend=Process.Start(info);var startedBackend=backend;Lifecycle("backend.start pid="+startedBackend.Id);startedBackend.Exited+=(s,e)=>{try{Lifecycle("backend.exit pid="+startedBackend.Id+" code="+startedBackend.ExitCode);}catch{}};startedBackend.EnableRaisingEvents=true;backend.ErrorDataReceived+=(s,e)=>{if(!String.IsNullOrEmpty(e.Data))try{File.AppendAllText(Path.Combine(profile,"host-errors.log"),DateTime.Now.ToString("s")+" "+e.Data+Environment.NewLine);}catch{}};backend.BeginErrorReadLine();
+  backend=Process.Start(info);var startedBackend=backend;Lifecycle("backend.start pid="+startedBackend.Id);ObserveService(startedBackend);backend.ErrorDataReceived+=(s,e)=>{if(!String.IsNullOrEmpty(e.Data))try{File.AppendAllText(Path.Combine(profile,"host-errors.log"),DateTime.Now.ToString("s")+" "+e.Data+Environment.NewLine);}catch{}};backend.BeginErrorReadLine();
   var lineTask=backend.StandardOutput.ReadLineAsync();if(await Task.WhenAny(lineTask,Task.Delay(20000))!=lineTask)throw new Exception("バックエンドの起動がタイムアウトしました");string line=await lineTask;if(String.IsNullOrEmpty(line))throw new Exception("バックエンドを起動できませんでした。host-errors.log を確認してください。");
-  var ready=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line);string url=Convert.ToString(ready["url"]);var uri=new Uri(url);origin=uri.GetLeftPart(UriPartial.Authority);token=uri.Fragment.TrimStart('#');return url;
+  var ready=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line);string url=Convert.ToString(ready["url"]);SetServiceUrl(url);RecordService(url);return url;
  }
  async Task Boot(){try{
   if(serviceReady==null||serviceReady.IsFaulted&&(backend==null||backend.HasExited))serviceReady=StartService();await serviceReady;if(IsDisposed)return;
@@ -187,7 +199,7 @@ class Workspace : Form {
   WindowSettings settings=new WindowSettings(); bool shuttingDown=false,restoring=true,recovering=false;int recoveries=0;uint lastFailedProcess=0;DateTime lastRecovery=DateTime.MinValue;
   public int Count{get{return windows.Count;}}
   public Session(){var handle=dispatcher.Handle;try{if(File.Exists(settingsFile))settings=serializer.Deserialize<WindowSettings>(File.ReadAllText(settingsFile));}catch{settings=new WindowSettings();}
-   settings=settings??new WindowSettings();settings.Positions=settings.Positions??new Dictionary<string,Placement>();int count=Environment.GetCommandLineArgs().Contains("--restore")?Math.Max(1,Math.Min(8,settings.Count)):1;settings.Count=count;
+   settings=settings??new WindowSettings();settings.Positions=settings.Positions??new Dictionary<string,Placement>();bool restore=Environment.GetCommandLineArgs().Contains("--restore")||FindService(ReadService())!=null;int count=restore?Math.Max(1,Math.Min(8,settings.Count)):1;settings.Count=count;
    for(int i=0;i<count;i++)Open();restoring=false;
   }
   public void DispatchNew(){try{if(!shuttingDown&&!dispatcher.IsDisposed)dispatcher.BeginInvoke(new Action(()=>{if(!shuttingDown){var hidden=windows.FirstOrDefault(w=>!w.Visible);if(hidden!=null)hidden.Restore();else Open();}}));}catch{}}
