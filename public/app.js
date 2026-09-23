@@ -1,4 +1,5 @@
 import {setupVoice} from './voice-input.js';
+import {usageLimited,aiErrorText} from './ai-errors.js';
 import {tabIcon,svgIcon} from './tab-icons.js';
 import {setupBookmarkFlyout} from './bookmark-flyout.js';
 import {bookmarkMarks,bookmarkMark,flatBookmarks} from './bookmark-marks.js';
@@ -93,7 +94,7 @@ const states = {
   unknown: "状態未取得",
 };
 const task = () => state.tasks.find((t) => t.id === state.active),
-  status = (t) => t?.stored ? "保管" : states[t?.state] || "状態未取得";
+  status = (t) => t?.stored ? "保管" : t?.state==='failed'&&(t.usageLimited||usageLimited(t.error)) ? 'AI利用上限' : states[t?.state] || "状態未取得";
 const time = (n) =>
   n
     ? new Date(n).toLocaleTimeString("ja-JP", {
@@ -123,6 +124,7 @@ async function api(url, data, keepalive=false) {
   if (!r.ok)
     throw Object.assign(new Error(result.error || "操作に失敗しました"), {
       status: r.status,
+      codexErrorInfo: result.codexErrorInfo,
     });
   return result;
 }
@@ -514,6 +516,7 @@ document.addEventListener("visibilitychange", () => {
   } else state.graph?.setVisible(false);
 });
 function renderConnection() {
+  if(state.serviceDown)return;
   $("connection").textContent = state.connected
     ? state.account?.type === "chatgpt"
       ? "Codex"
@@ -724,7 +727,7 @@ function renderConversation() {
   if (t.state === "running" || t.state === "starting")
     html += '<div class="busy-label">◌ 作業中</div>';
   if (t.error)
-    html += '<div class="tool-summary pink">' + esc(t.error) + "</div>";
+    html += '<div class="tool-summary pink">' + esc(aiErrorText(t.usageLimited?{codexErrorInfo:'UsageLimitExceeded',message:t.error}:t.error)) + "</div>";
   const opened = new Set([...$("conversation").querySelectorAll("[data-process][open]")].map(el => el.dataset.process));
   $("conversation").innerHTML = html;
   for (const el of $("conversation").querySelectorAll("[data-process]")) if (opened.has(el.dataset.process)) el.open = true;
@@ -751,7 +754,7 @@ $("conversation").addEventListener("click", async (e) => {
       await selectTask(t.id);
     }
   } catch (err) {
-    toast(err.message);
+    toast(aiErrorText(err));
   }
 });
 function scheduleConversation() {
@@ -905,7 +908,7 @@ $("composer").addEventListener("submit", async (e) => {
     else await loadHistory(t.id);
     renderAttachments();
   } catch (err) {
-    toast(err.message);
+    toast(aiErrorText(err));
   } finally {
     state.sending.delete(t.id);
     renderActive();
@@ -1228,7 +1231,7 @@ function showPalette() {
 action("palette-button", showPalette);
 action('menu-appearance',()=>{$('app-menu').open=false;showPalette();});
 function renderUsageBadge() {
-  $("usage-button").textContent = usageSummary(state.usage);
+  $("usage-button").textContent = state.serviceDown?'利用量 · 未更新':usageSummary(state.usage);
 }
 async function showUsage() {
   openDialog(
@@ -1265,11 +1268,39 @@ async function showUsage() {
   await refresh();
 }
 action("usage-button", showUsage);
+let recoveryRefresh;
+function showServiceDown(message='接続を復元中…') {
+  state.serviceDown=true;$('connection').textContent=message;$('connection').classList.remove('ok');
+  $('service-reconnect').hidden=false;
+  renderUsageBadge();
+}
+function refreshRecoveredService() {
+  if(recoveryRefresh)return recoveryRefresh;
+  recoveryRefresh=(async()=>{
+    // Keep the live DOM, WebViews and editors. Only resync server-owned state.
+    stashDraft();
+    if(!paneMode){await paneShell?.save();await saveDrafts();await api('/preferences',preferenceSnapshot());await api('/tabs',{tabs:state.tabs,activeTab:state.activeTab});}
+    const b=await api('/bootstrap');
+    for(const key of ['tasks','connected','account','models','error','requests','sequence','serviceId','links','bookmarks','usage','desktop'])state[key]=b[key];
+    state.serviceDown=false;closingWindow=false;$('service-reconnect').hidden=true;
+    renderConnection();renderUsageBadge();renderSidebar();renderWorkTabs();renderActive();
+    if(state.active)await loadHistory(state.active);
+  })().finally(()=>{recoveryRefresh=null;});
+  return recoveryRefresh;
+}
+action('service-reconnect',async()=>{
+  if(native&&!paneMode)await host('app.reconnect');
+  else await refreshRecoveredService();
+});
 async function poll() {
   while (true) {
     if(paneMode&&!paneVisible){await new Promise(r=>setTimeout(r,3000));continue;}
     try {
-      const r = await api("/events?after=" + state.sequence + "&active=" + encodeURIComponent(state.active || ""));
+      const r = await api("/events?after=" + state.sequence + "&active=" + encodeURIComponent(state.active || "") + '&serviceId=' + encodeURIComponent(state.serviceId||''));
+      if(state.serviceDown||(r.serviceId&&state.serviceId&&r.serviceId!==state.serviceId)){
+        await refreshRecoveredService();continue;
+      }
+      if(r.serviceId)state.serviceId=r.serviceId;
       for (const e of r.events) {
         state.sequence = e.seq;
         handleEvent(e);
@@ -1277,7 +1308,7 @@ async function poll() {
       state.sequence = r.sequence;
       renderConnection();
     } catch (e) {
-      $("connection").textContent = "接続を確認中…";
+      showServiceDown();
       await new Promise((r) => setTimeout(r, 2500));
     }
   }
@@ -2312,6 +2343,9 @@ if (native)
       api('/connect',{}).catch(()=>{});
       api('/sync',{active:state.active}).then(r=>{r.tasks.forEach(upsert);renderSidebar();renderActive();if(state.active)return loadHistory(state.active);}).catch(e=>toast(e.message));return;
     }
+    if(m.type==='app.serviceRecovering'){showServiceDown();return;}
+    if(m.type==='app.serviceRecovered'){refreshRecoveredService().catch(e=>{showServiceDown('再接続できます');toast(e.message);});return;}
+    if(m.type==='app.serviceFailed'){showServiceDown('再接続できます');toast(m.message);return;}
     if (m.type === "app.closing" || m.type==='app.saving') {
       if(m.type==='app.closing'&&voice.active()){toast('音声入力を終了してから閉じてください');return;}
       closingWindow=m.type==='app.closing';

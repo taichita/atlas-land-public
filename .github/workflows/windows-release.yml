@@ -25,6 +25,8 @@ jobs:
       - run: npm test
       - run: node test/ui-check.mjs
       - run: node test/ui-history.mjs
+      - run: node test/service-recovery-e2e.mjs
+      - run: node test/pane-zoom-e2e.mjs
       - run: node test/bookmarks-e2e.mjs
       - run: node test/notes-e2e.mjs
       - run: node test/personalization-e2e.mjs

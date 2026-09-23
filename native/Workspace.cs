@@ -33,7 +33,7 @@ class Workspace : Form {
  static Process FindService(ServiceRecord r){if(r==null)return null;try{var p=Process.GetProcessById(r.Pid);if(p.HasExited||p.StartTime.ToUniversalTime().ToString("o")!=r.StartedUtc||!String.Equals(p.MainModule.FileName,r.Executable,StringComparison.OrdinalIgnoreCase))return null;return p;}catch{return null;}}
  static void SetServiceUrl(string url){var uri=new Uri(url);string secret=uri.Fragment.TrimStart('#');if(uri.Scheme!="http"||uri.Host!="127.0.0.1"||uri.AbsolutePath!="/"||uri.Query!=""||uri.UserInfo!=""||!System.Text.RegularExpressions.Regex.IsMatch(secret,"\\A[a-f0-9]{64}\\z"))throw new Exception("バックエンドの接続情報を確認できませんでした");origin=uri.GetLeftPart(UriPartial.Authority);token=secret;}
  static void RecordService(string url){var r=new ServiceRecord{Pid=backend.Id,StartedUtc=backend.StartTime.ToUniversalTime().ToString("o"),Executable=backend.MainModule.FileName,Root=appDir,Url=url};string temp=serviceFile+".tmp";File.WriteAllText(temp,new JavaScriptSerializer().Serialize(r));if(File.Exists(serviceFile))File.Replace(temp,serviceFile,null);else File.Move(temp,serviceFile);}
- static void ObserveService(Process process){process.Exited+=(s,e)=>{try{Lifecycle("backend.exit pid="+process.Id+" code="+process.ExitCode);}catch{}};process.EnableRaisingEvents=true;}
+ static void ObserveService(Process process){process.Exited+=(s,e)=>{try{Lifecycle("backend.exit pid="+process.Id+" code="+process.ExitCode);}catch{}if(session!=null)session.RecoverService(process);};process.EnableRaisingEvents=true;}
  readonly string windowId; bool uiReady,prepareTwo,disposedViews;
  readonly Stopwatch startupClock=Stopwatch.StartNew(); WebView2 ui; CoreWebView2Environment browsing; string activePage; Rectangle pageBounds; readonly Dictionary<string,Rectangle> browserBounds=new Dictionary<string,Rectangle>(); bool browserVisible=false,exiting=false; int running=0; NotifyIcon tray;
  [STAThread] static void Main(){bool created;using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AtlasLandNewWindow"+InstanceSuffix()))using(var mutex=new Mutex(true,"Local\\PersonalAIWorkspaceDesktop"+InstanceSuffix(),out created)){
@@ -54,7 +54,7 @@ class Workspace : Form {
   BindShortcuts(this,null);Shown+=async(s,e)=>await Boot();Resize+=(s,e)=>{if(WindowState==FormWindowState.Minimized)HidePages();else LayoutPage();};FormClosing+=OnClosing;
  }
  void Restore(){Show();WindowState=FormWindowState.Normal;Activate();tray.Visible=false;LayoutPage();}
- static async Task<string> StartService(){
+ static async Task<string> StartService(bool preserve=false){
   Directory.CreateDirectory(profile);
   var saved=ReadService();var existing=FindService(saved);
   if(existing!=null){
@@ -63,7 +63,9 @@ class Workspace : Form {
   }
   string node=Environment.GetEnvironmentVariable("AI_WORKSPACE_NODE");if(String.IsNullOrEmpty(node)){node=Path.Combine(appDir,"runtime","node.exe");if(!File.Exists(node))node=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"nodejs","node.exe");}if(!File.Exists(node))throw new Exception("Node.js が見つかりません。セットアップを再実行してください。");
   var info=new ProcessStartInfo(node,"\""+Path.Combine(appDir,"server","main.mjs")+"\""){WorkingDirectory=appDir,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8};
-  info.EnvironmentVariables["ATLAS_FRESH_SESSION"]=Environment.GetCommandLineArgs().Contains("--restore")?"0":"1";
+  info.EnvironmentVariables["ATLAS_FRESH_SESSION"]=preserve||Environment.GetCommandLineArgs().Contains("--restore")?"0":"1";
+  if(preserve&&saved!=null){SetServiceUrl(saved.Url);info.EnvironmentVariables["ATLAS_SERVICE_PORT"]=new Uri(saved.Url).Port.ToString();info.EnvironmentVariables["ATLAS_SERVICE_TOKEN"]=token;}
+  else{info.EnvironmentVariables.Remove("ATLAS_SERVICE_PORT");info.EnvironmentVariables.Remove("ATLAS_SERVICE_TOKEN");}
   if(Environment.GetEnvironmentVariable("AI_WORKSPACE_DATA")==null)info.EnvironmentVariables["AI_WORKSPACE_DATA"]=Path.Combine(profile,"data");
   if(Environment.GetEnvironmentVariable("ATLAS_PROFILE")==null&&!File.Exists(Path.Combine(appDir,"installation.json")))info.EnvironmentVariables["ATLAS_CHROME_SYNC"]="1";
   backend=Process.Start(info);var startedBackend=backend;Lifecycle("backend.start pid="+startedBackend.Id);ObserveService(startedBackend);backend.ErrorDataReceived+=(s,e)=>{if(!String.IsNullOrEmpty(e.Data))try{File.AppendAllText(Path.Combine(profile,"host-errors.log"),DateTime.Now.ToString("s")+" "+e.Data+Environment.NewLine);}catch{}};backend.BeginErrorReadLine();
@@ -71,7 +73,7 @@ class Workspace : Form {
   var ready=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(line);string url=Convert.ToString(ready["url"]);SetServiceUrl(url);RecordService(url);return url;
  }
  async Task Boot(){try{
-  if(serviceReady==null||serviceReady.IsFaulted&&(backend==null||backend.HasExited))serviceReady=StartService();await serviceReady;if(IsDisposed)return;
+  if(serviceReady==null||serviceReady.IsFaulted||backend!=null&&backend.HasExited)serviceReady=StartService(serviceReady!=null);await serviceReady;if(IsDisposed)return;
   string url=origin+"/?window="+Uri.EscapeDataString(windowId)+"#"+token;
   ui=new WebView2{Dock=DockStyle.Fill,DefaultBackgroundColor=BackColor};Controls.Clear();Controls.Add(ui);
   var env=await CoreWebView2Environment.CreateAsync(null,Path.Combine(profile,"webview","shared"));browsing=env;var uiOptions=env.CreateCoreWebView2ControllerOptions();uiOptions.ProfileName="Workspace";await ui.EnsureCoreWebView2Async(env,uiOptions);
@@ -157,6 +159,7 @@ class Workspace : Form {
   else if(action=="window.dual")session.Dual(this);
   else if(action=="window.ready"){uiReady=true;if(prepareTwo){prepareTwo=false;Post(new{type="window.twoPanes"});}}
   else if(action=="window.focusUI")ui.Focus();
+  else if(action=="app.reconnect")session.RetryService();
   else if(action=="app.exit"){if(running>0&&session.Count==1){Hide();tray.Visible=true;foreach(var page in pages.Values)page.Dispose();pages.Clear();browserBounds.Clear();browserVisible=false;activePage=null;ui.CoreWebView2.Reload();}else{exiting=true;Close();}}
   Post(new{type="response",requestId=requestId,result=true});
  }catch(Exception error){Post(new{type="response",requestId=requestId,error=error.Message});}}
@@ -188,6 +191,7 @@ class Workspace : Form {
   if(disposedViews)return;
   Lifecycle("window.closing id="+windowId+" reason="+e.CloseReason+" exiting="+exiting+" running="+running);
   if(e.CloseReason==CloseReason.WindowsShutDown){session.SavePosition(this);Post(new{type="app.saving"});exiting=true;}
+  if(!exiting&&backend!=null&&backend.HasExited){e.Cancel=true;session.RetryService();return;}
   if(!exiting&&ui!=null&&ui.CoreWebView2!=null){e.Cancel=true;Post(new{type="app.closing"});return;}
   session.SavePosition(this);disposedViews=true;tray.Dispose();foreach(var p in pages.Values)p.Dispose();if(ui!=null)ui.Dispose();
  }
@@ -196,7 +200,7 @@ class Workspace : Form {
  class Session : ApplicationContext {
   readonly List<Workspace> windows=new List<Workspace>(); readonly Control dispatcher=new Control();
   readonly string settingsFile=Path.Combine(profile,"windows.json"); readonly JavaScriptSerializer serializer=new JavaScriptSerializer();
-  WindowSettings settings=new WindowSettings(); bool shuttingDown=false,restoring=true,recovering=false;int recoveries=0;uint lastFailedProcess=0;DateTime lastRecovery=DateTime.MinValue;
+  WindowSettings settings=new WindowSettings(); bool shuttingDown=false,restoring=true,recovering=false,serviceRecovering=false;int recoveries=0,serviceRecoveries=0;uint lastFailedProcess=0;DateTime lastRecovery=DateTime.MinValue,lastServiceRecovery=DateTime.MinValue;
   public int Count{get{return windows.Count;}}
   public Session(){var handle=dispatcher.Handle;try{if(File.Exists(settingsFile))settings=serializer.Deserialize<WindowSettings>(File.ReadAllText(settingsFile));}catch{settings=new WindowSettings();}
    settings=settings??new WindowSettings();settings.Positions=settings.Positions??new Dictionary<string,Placement>();bool restore=Environment.GetCommandLineArgs().Contains("--restore")||FindService(ReadService())!=null;int count=restore?Math.Max(1,Math.Min(8,settings.Count)):1;settings.Count=count;
@@ -204,6 +208,19 @@ class Workspace : Form {
   }
   public void DispatchNew(){try{if(!shuttingDown&&!dispatcher.IsDisposed)dispatcher.BeginInvoke(new Action(()=>{if(!shuttingDown){var hidden=windows.FirstOrDefault(w=>!w.Visible);if(hidden!=null)hidden.Restore();else Open();}}));}catch{}}
   public void Wake(){try{dispatcher.BeginInvoke(new Action(()=>{foreach(var w in windows){w.Post(new{type="app.resumed"});w.LayoutPage();}}));}catch{}}
+  public void RetryService(){serviceRecoveries=0;if(backend!=null&&!backend.HasExited){foreach(var w in windows)w.Post(new{type="app.serviceRecovered"});return;}RecoverService(backend);}
+  public void RecoverService(Process stopped){try{dispatcher.BeginInvoke(new Action(async()=>{
+   if(shuttingDown||serviceRecovering||stopped!=backend||windows.Count==0)return;
+   serviceRecovering=true;
+   try{
+    if((DateTime.UtcNow-lastServiceRecovery).TotalMinutes>2)serviceRecoveries=0;lastServiceRecovery=DateTime.UtcNow;
+    if(++serviceRecoveries>3){foreach(var w in windows)w.Post(new{type="app.serviceFailed",message="接続の停止が続いています。再接続から再試行できます。"});Lifecycle("backend.recovery-limit");return;}
+    Lifecycle("backend.recover");foreach(var w in windows)w.Post(new{type="app.serviceRecovering"});
+    serviceReady=StartService(true);await serviceReady;
+    foreach(var w in windows)w.Post(new{type="app.serviceRecovered"});Lifecycle("backend.recovered pid="+backend.Id);
+   }catch(Exception e){Lifecycle("backend.recovery-failed "+e.GetType().Name);foreach(var w in windows)w.Post(new{type="app.serviceFailed",message="接続を復元できませんでした。再接続から再試行できます。"});}
+   finally{serviceRecovering=false;}
+  }));}catch{}}
   public void RecoverViews(uint processId){try{dispatcher.BeginInvoke(new Action(async()=>{
    if(shuttingDown||recovering||lastFailedProcess==processId)return;recovering=true;lastFailedProcess=processId;
    try{if((DateTime.UtcNow-lastRecovery).TotalMinutes>2)recoveries=0;lastRecovery=DateTime.UtcNow;

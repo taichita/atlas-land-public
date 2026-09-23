@@ -1,4 +1,7 @@
 import {requestResponse} from '../public/approval-forms.js';
+import {usageLimited} from '../public/ai-errors.js';
+import {serviceBinding} from './service-session.mjs';
+import {appendFileSync} from 'node:fs';
 import {readInstallation,applyInstallation,accessModes} from './installation.mjs';
 import {windowState,freshWorkspace,blankUI} from './windows.mjs';
 import {normalizeTheme} from '../public/theme.js';
@@ -66,7 +69,12 @@ async function refreshUsage() {
   }
   return { providers: [codexLimits, await claudeUsage()] };
 }
-const token = crypto.randomBytes(32).toString("hex");
+const binding = serviceBinding();
+const token = binding.token || crypto.randomBytes(32).toString("hex");
+const serviceId = crypto.randomUUID();
+function serviceLog(event) { try { appendFileSync(path.join(dataDir,'service-lifecycle.log'),new Date().toISOString()+' pid='+process.pid+' '+event+'\n'); } catch {} }
+process.on('uncaughtExceptionMonitor',error=>serviceLog('uncaught '+error.name+' '+error.message));
+process.on('exit',code=>serviceLog('exit code='+code));
 const started = Date.now(),
   subscribers = new Set(),
   events = [],
@@ -213,6 +221,7 @@ bridge.on("notification", (m) => {
       t.turnStartedAt = Date.now();
       t.turnEndedAt = null;
       t.error = null;
+      t.usageLimited = false;
       store.event(t, "turn", "AIが作業を開始しました");
       update(t);
       break;
@@ -229,6 +238,7 @@ bridge.on("notification", (m) => {
       t.lastReplyAt = Date.now();
       t.unread = true;
       t.error = p.turn?.error?.message || null;
+      t.usageLimited = usageLimited(p.turn?.error);
       store.event(
         t,
         t.error ? "error" : "turn",
@@ -373,6 +383,8 @@ bridge.on("notification", (m) => {
       break;
     case "error":
       t.error = p.error?.message || p.message || "エラー";
+      t.usageLimited = usageLimited(p.error||p);
+      if(t.usageLimited)serviceLog('ai.usage-limit');
       store.event(t, "error", "実行エラー", { detail: t.error });
       update(t);
       break;
@@ -595,6 +607,7 @@ async function sendTurn(t, input) {
   } catch (e) {
     t.state = "failed";
     t.error = e.message;
+    t.usageLimited = usageLimited(e);
     update(t);
     throw e;
   }
@@ -763,6 +776,7 @@ const server = http.createServer(async (req, res) => {
           ui: {...local.ui,...(store.data.appearance?{theme:store.data.appearance.theme,bodySize:store.data.appearance.bodySize,appearanceVersion:3}:{})},
           requests: requests(),
           sequence,
+          serviceId,
           defaultFolder:store.data.defaultFolder||defaultFolder,
           defaultAccess:store.data.defaultAccess||'danger-full-access',
           usage: {
@@ -833,6 +847,7 @@ const server = http.createServer(async (req, res) => {
         );
       }
       if (pathname === "/api/events") {
+        if(url.searchParams.get('serviceId')&&url.searchParams.get('serviceId')!==serviceId)return json(res,{events:[],sequence,serviceId});
         if(!connected&&Date.now()-lastReconnect>10000){lastReconnect=Date.now();connect().catch(()=>{});}
         desktopSync.touch(url.searchParams.get("active"));
         const after = Number(url.searchParams.get("after") || 0);
@@ -840,7 +855,7 @@ const server = http.createServer(async (req, res) => {
           const found = events.filter((e) => e.seq > after);
           if (found.length) {
             cleanup();
-            json(res, { events: found, sequence });
+            json(res, { events: found, sequence, serviceId });
             return true;
           }
           return false;
@@ -851,7 +866,7 @@ const server = http.createServer(async (req, res) => {
         };
         const timer = setTimeout(() => {
           cleanup();
-          json(res, { events: [], sequence });
+          json(res, { events: [], sequence, serviceId });
         }, 25000);
         res.on("close", cleanup);
         if (!deliver()) subscribers.add(deliver);
@@ -1343,7 +1358,7 @@ const server = http.createServer(async (req, res) => {
         });
       if (pathname === "/api/shutdown" && req.method === "POST") {
         json(res, { ok: true });
-        setTimeout(shutdown, 50);
+        setTimeout(() => shutdown('api/shutdown'), 50);
         return;
       }
       fail("未対応の操作です", 404);
@@ -1402,20 +1417,22 @@ const server = http.createServer(async (req, res) => {
       "Cache-Control": "no-cache",
     });
   } catch (e) {
-    if (!res.headersSent) json(res, { error: e.message }, e.status || 500);
+    if (!res.headersSent) json(res, { error: e.message, ...(e.codexErrorInfo?{codexErrorInfo:e.codexErrorInfo}:{}) }, e.status || 500);
     else res.end();
   }
 });
-function shutdown() {
+function shutdown(reason) {
+  serviceLog('shutdown reason='+reason);
   desktopSync.close();
   store.flush();
   bridge.close();
   server.close();
   setTimeout(() => process.exit(0), 300).unref();
 }
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-server.listen(0, "127.0.0.1", () => {
+process.on("SIGINT", () => shutdown('SIGINT'));
+process.on("SIGTERM", () => shutdown('SIGTERM'));
+server.listen(binding.port, "127.0.0.1", () => {
   origin = "http://127.0.0.1:" + server.address().port;
+  serviceLog('start port='+server.address().port+' restored='+(process.env.ATLAS_FRESH_SESSION==='0'));
   console.log(JSON.stringify({ url: origin + "/#" + token, pid: process.pid }));
 });

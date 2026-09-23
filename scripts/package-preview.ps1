@@ -36,7 +36,7 @@ Copy-ReleaseFile (Join-Path $taskRoot 'scripts\claude-statusline.mjs') 'scripts\
 Copy-ReleaseFile (Join-Path $taskRoot 'docs\preview-start.md') 'はじめに.md'
 Copy-ReleaseFile (Join-Path $taskRoot 'docs\shortcuts-and-local-tools.md') '操作方法.md'
 Copy-ReleaseFile (Join-Path $taskRoot 'docs\workplace-review.md') '職場での利用確認.md'
-foreach($taskDoc in @('multiple-windows','appearance','quick-notes','bookmarks','vertical-tabs','translation','updates','recovery','personalization')){
+foreach($taskDoc in @('multiple-windows','appearance','quick-notes','bookmarks','vertical-tabs','translation','updates','recovery','host-recovery','personalization')){
  Copy-ReleaseFile (Join-Path $taskRoot "docs\$taskDoc.md") "docs\$taskDoc.md"
 }
 Copy-ReleaseFile (Join-Path $taskRoot 'node_modules\safer-buffer\LICENSE') 'licenses\safer-buffer-LICENSE.txt'

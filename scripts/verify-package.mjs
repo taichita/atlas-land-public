@@ -6,7 +6,7 @@ import {createRequire} from 'node:module';
 const root=path.resolve(process.argv[2]);
 const manifest=JSON.parse((await fs.readFile(path.join(root,'manifest.json'),'utf8')).replace(/^\uFEFF/,''));
 for(const file of manifest.files){
- assert(!/(^|\/)(auth\.json|workspace\.json|\.env|\.codex|webview|backups|drafts|\.test-data|test|playwright-core)(\/|$)/.test(file.path),file.path);
+ assert(!/(^|\/)(auth\.json|workspace\.json|backend-session\.json|\.env|\.codex|webview|backups|drafts|\.test-data|test|playwright-core)(\/|$)/.test(file.path),file.path);
  const target=path.resolve(root,file.path);assert(target.startsWith(root+path.sep));
  const bytes=await fs.readFile(target);assert.equal(bytes.length,file.bytes,file.path);
  assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),file.sha256,file.path);

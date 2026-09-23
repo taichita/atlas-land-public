@@ -77,7 +77,7 @@ export class CodexBridge extends EventEmitter {
       clearTimeout(p.timer);
       this.pending.delete(m.id);
       if (m.error)
-        p.reject(new Error(m.error.message || JSON.stringify(m.error)));
+        p.reject(Object.assign(new Error(m.error.message || JSON.stringify(m.error)),{code:m.error.code,data:m.error.data,codexErrorInfo:m.error.codexErrorInfo||m.error.data?.codexErrorInfo}));
       else p.resolve(m.result);
     });
     const init = await this.call(
@@ -86,7 +86,7 @@ export class CodexBridge extends EventEmitter {
         clientInfo: {
           name: "personal_ai_workspace",
           title: "Atlas Browser",
-          version: "0.3.1",
+          version: "0.4.1",
         },
         capabilities: { experimentalApi: true },
       },
