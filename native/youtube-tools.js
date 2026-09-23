@@ -9,7 +9,9 @@
   function request(refresh=false){if(!videoId)return;send({action:'retention',videoId,refresh});lastRequested=videoId;}
   function mount(){
     const next=id();if(!next){host?.remove();host=null;lastRequested=null;return;}
-    const target=document.querySelector('ytd-watch-flexy #secondary-inner')||document.querySelector('ytd-watch-flexy #secondary')||document.querySelector('#related');
+    // Narrow panes and newer watch layouts can keep a hidden secondary column.
+    // Use the visible recommendation container, or metadata while it is absent.
+    const target=['#secondary-inner','#secondary','#related','ytd-watch-metadata'].map(s=>document.querySelector(s)).find(e=>e&&e.getBoundingClientRect().width>0);
     if(!target)return;
     if(!host?.isConnected){
       host=el('div');host.id='atlas-youtube-tools';root=host.attachShadow({mode:'closed'});
@@ -23,6 +25,7 @@
       root.querySelector('#capture').onclick=()=>send({action:'capture',videoId});
       root.querySelector('#preview').onclick=()=>preview();
     }
+    if(host.parentElement!==target)target.prepend(host);
     if(videoId!==next){videoId=next;root.querySelector('.status').textContent='読み込み中…';root.querySelector('#graph').replaceChildren();root.querySelector('#preview-card').hidden=true;}
     if(lastRequested!==videoId)request();
   }
@@ -65,6 +68,7 @@
   window.__atlasYouTube={render,preview,capture};
   const schedule=()=>{if(timer)return;timer=setTimeout(()=>{timer=null;mount();},400);};
   document.addEventListener('yt-navigate-finish',schedule);
+  window.addEventListener('resize',schedule);
   const start=()=>{new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true});mount();};
   if(document.body)start();else document.addEventListener('DOMContentLoaded',start,{once:true});
 })();

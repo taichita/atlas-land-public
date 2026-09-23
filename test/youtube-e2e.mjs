@@ -25,5 +25,7 @@ try{
   await page.waitForFunction(()=>window.messages.some(m=>m.action==='retention'&&m.videoId==='xyzDEF12345'));
   assert.equal(await page.locator('#atlas-youtube-tools').count(),1);assert.equal(await page.locator('#atlas-youtube-tools svg').count(),0);
   await page.evaluate(()=>window.__atlasYouTube.render({videoId:'abcDEF12345',points:[{position:0,ratio:1}]}));assert.equal(await page.locator('#atlas-youtube-tools svg').count(),0);
+  await page.evaluate(()=>{document.querySelector('#secondary-inner').style.display='none';document.body.append(document.createElement('ytd-watch-metadata'));document.querySelector('ytd-watch-metadata').style.display='block';window.dispatchEvent(new Event('resize'));});
+  await page.waitForFunction(()=>document.querySelector('#atlas-youtube-tools')?.parentElement.tagName==='YTD-WATCH-METADATA');
   console.log('PASS: retention graph, recommendation card, timed transcript, SPA navigation and stale-response isolation.');
 }finally{await browser.close();}
