@@ -11,7 +11,13 @@
     const next=id();if(!next){host?.remove();host=null;lastRequested=null;return;}
     const target=document.querySelector('ytd-watch-flexy #secondary-inner')||document.querySelector('ytd-watch-flexy #secondary')||document.querySelector('#related');
     if(!target)return;
-    if(!host?.isConnected){host=el('div');host.id='atlas-youtube-tools';root=host.attachShadow({mode:'closed'});root.innerHTML='<style>'+style+'</style><section><header><strong>視聴者維持率</strong><button id="refresh" title="更新">↻</button></header><div class="status">読み込み中…</div><div id="graph"></div><div class="tools"><button id="connect">Studio接続</button><button id="capture" title="Ctrl+Shift+Y">文字起こし＋スクショ</button><button id="preview" title="Ctrl+Alt+Y">おすすめ表示</button></div><div id="preview-card" hidden></div></section>';target.prepend(host);
+    if(!host?.isConnected){
+      host=el('div');host.id='atlas-youtube-tools';root=host.attachShadow({mode:'closed'});
+      // YouTube enforces Trusted Types. Build nodes instead of assigning HTML.
+      const section=el('section'),heading=el('header'),refresh=el('button','↻'),status=el('div','読み込み中…'),graph=el('div'),tools=el('div'),previewBox=el('div');
+      refresh.id='refresh';refresh.title='更新';heading.append(el('strong','視聴者維持率'),refresh);status.className='status';graph.id='graph';tools.className='tools';previewBox.id='preview-card';previewBox.hidden=true;
+      for(const [key,label,title]of [['connect','Studio接続',''],['capture','文字起こし＋スクショ','Ctrl+Shift+Y'],['preview','おすすめ表示','Ctrl+Alt+Y']]){const b=el('button',label);b.id=key;b.title=title;tools.append(b);}
+      section.append(heading,status,graph,tools,previewBox);root.append(el('style',style),section);target.prepend(host);
       root.querySelector('#refresh').onclick=()=>request(true);
       root.querySelector('#connect').onclick=()=>send({action:'connect',videoId});
       root.querySelector('#capture').onclick=()=>send({action:'capture',videoId});

@@ -12,7 +12,9 @@ try{
     const attach=Element.prototype.attachShadow;Element.prototype.attachShadow=function(options){return attach.call(this,{...options,mode:'open'});};
     document.querySelector('#movie_player').getPlayerResponse=()=>({videoDetails:{title:'日本語の動画タイトル <script>literal</script>',author:'テストチャンネル',lengthSeconds:1800},captions:{playerCaptionsTracklistRenderer:{captionTracks:[{languageCode:'ja',baseUrl:'https://www.youtube.com/api/timedtext'}]}}});
   });
-  await page.addScriptTag({content:await fs.readFile('native/youtube-tools.js','utf8')});
+  // Match YouTube's Trusted Types restriction: injected UI must not use HTML sinks.
+  await page.evaluate(()=>{const meta=document.createElement('meta');meta.httpEquiv='Content-Security-Policy';meta.content="require-trusted-types-for 'script'";document.head.append(meta);});
+  await page.evaluate(await fs.readFile('native/youtube-tools.js','utf8'));
   assert.equal(await page.locator('#atlas-youtube-tools').count(),1);
   await page.evaluate(()=>window.__atlasYouTube.render({videoId:'abcDEF12345',points:[{position:0,ratio:1.2},{position:0.5,ratio:0.6},{position:1,ratio:0.3}],fetchedAt:Date.now()}));
   assert.equal(await page.locator('#atlas-youtube-tools svg polyline').count(),1);
