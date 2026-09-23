@@ -1,5 +1,6 @@
 import { DesktopBridge } from "./desktop.mjs";
 import crypto from 'node:crypto';
+import {readTurnHistory} from './turn-history.mjs';
 import {policyFor,policyHash,policyUpdate} from './agent-policy.mjs';
 
 export function desktopMessage(item, contextId) {
@@ -132,7 +133,7 @@ export class DesktopSync {
     // Read the bodies without resuming; only the original executor owns status.
     const [r, history] = await Promise.all([
       cursor ? Promise.resolve({}) : this.call("read_thread", { threadId: t.id, hostId: "local", turnLimit: 2, includeOutputs: false, maxOutputCharsPerItem: 20000 }),
-      this.bridge.call("thread/turns/list", { threadId: t.id, itemsView: "full", limit: cursor ? 8 : 2, sortDirection: "desc", ...(cursor ? { cursor } : {}) }),
+      readTurnHistory(this.bridge, { threadId: t.id, limit: cursor ? 8 : 2, sortDirection: "desc", ...(cursor ? { cursor } : {}) }),
     ]);
     const turns = (history.data || []).map(turn => {
       const live = r.turns?.find(t => t.id === turn.id);
@@ -140,7 +141,7 @@ export class DesktopSync {
       for (const item of live?.items || []) items.set(item.id, item);
       return { ...turn, ...(live ? { status: live.status } : {}), items: [...items.values()].map(this.cleanItem) };
     });
-    const result = { data: turns, nextCursor: history.nextCursor, live: [], source: "desktop" };
+    const result = { data: turns, nextCursor: history.nextCursor, live: [], source: "desktop", compactHistory: !!history.compactHistory };
     if (cursor) return result;
     const signature = JSON.stringify(turns);
     const changed = signature !== this.signatures.get(t.id);

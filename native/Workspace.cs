@@ -22,6 +22,8 @@ class Workspace : Form {
  bool mediaKeys=true,shortcutCapture=false; string mediaIncrease="V",mediaDecrease="Z";
  readonly Dictionary<string,string> shortcutCommands=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
  readonly Dictionary<string,WebView2> pages=new Dictionary<string,WebView2>();
+ readonly Dictionary<string,string> youtubeRequests=new Dictionary<string,string>();
+ static bool IsYouTube(string value){Uri u;return Uri.TryCreate(value,UriKind.Absolute,out u)&&u.Scheme=="https"&&(u.Host=="www.youtube.com"||u.Host=="youtube.com"||u.Host=="m.youtube.com");}
  static readonly string appDir=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,".."));
  // Stable storage identity keeps existing logins and task data.
  static readonly string profile=Environment.GetEnvironmentVariable("ATLAS_PROFILE")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"PersonalAIWorkspace");
@@ -143,6 +145,24 @@ class Workspace : Form {
    Post(new{type="response",requestId=requestId,result=json.DeserializeObject(result)});return;
   }
   else if(action=="browser.read"&&pages.ContainsKey(id)){string result=await pages[id].CoreWebView2.ExecuteScriptAsync("(()=>({title:document.title,url:location.href,text:(getSelection().toString()||document.body.innerText).slice(0,40000),links:Array.from(document.querySelectorAll('a[href]')).slice(0,60).map(a=>({text:a.innerText.slice(0,120),url:a.href}))}))()");Post(new{type="response",requestId=requestId,result=json.DeserializeObject(result)});return;}
+  else if(action=="youtube.oauth.open"){
+   Uri auth;if(!Uri.TryCreate(Str(m,"url"),UriKind.Absolute,out auth)||auth.Scheme!="https"||auth.Host!="accounts.google.com"||auth.AbsolutePath!="/o/oauth2/v2/auth")throw new Exception("Google認証のURLを確認してください");
+   Process.Start(new ProcessStartInfo(auth.AbsoluteUri){UseShellExecute=true});
+  }
+  else if(action.StartsWith("browser.youtube.")&&pages.ContainsKey(id)){
+   var web=pages[id];if(!IsYouTube(web.CoreWebView2.Source))throw new Exception("YouTubeの動画を開いてください");
+   if(action=="browser.youtube.screenshot"){
+    string capturedUrl=web.CoreWebView2.Source;
+    using(var bytes=new MemoryStream()){await web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,bytes);if(capturedUrl!=web.CoreWebView2.Source)throw new Exception("動画が切り替わりました。再取得してください");if(bytes.Length>2500000)throw new Exception("画像が大きすぎます。ペインを小さくして再取得してください");Post(new{type="response",requestId=requestId,result=new{url=capturedUrl,bytes=Convert.ToBase64String(bytes.ToArray())}});}return;
+   }
+   if(action=="browser.youtube.transcript"){
+    string waitingId=requestId;youtubeRequests[waitingId]=id;
+    await web.CoreWebView2.ExecuteScriptAsync("window.__atlasYouTube && window.__atlasYouTube.capture("+json.Serialize(waitingId)+")");
+    Task.Delay(30000).ContinueWith(t=>{if(!IsDisposed)BeginInvoke(new Action(()=>youtubeRequests.Remove(waitingId)));});return;
+   }
+   if(action=="browser.youtube.render")await web.CoreWebView2.ExecuteScriptAsync("window.__atlasYouTube && window.__atlasYouTube.render("+json.Serialize(m["payload"])+")");
+   else if(action=="browser.youtube.preview")await web.CoreWebView2.ExecuteScriptAsync("window.__atlasYouTube && window.__atlasYouTube.preview()");
+  }
   else if(action=="browser.speed"&&pages.ContainsKey(id)){double speed=Convert.ToDouble(m["speed"]);if(speed<0.25||speed>8)throw new Exception("速度は0.25〜8倍で指定してください");string speedText=speed.ToString(System.Globalization.CultureInfo.InvariantCulture);string count=await pages[id].CoreWebView2.ExecuteScriptAsync("(()=>{let v=document.querySelectorAll('video,audio');v.forEach(x=>x.playbackRate="+speedText+");return v.length})()");Post(new{type="response",requestId=requestId,result=json.DeserializeObject(count)});return;}
   else if(action=="chooseFolder"){HidePages();using(var picker=new FolderBrowserDialog{Description="作業フォルダ",SelectedPath=Str(m,"path",@"C:\dev"),ShowNewFolderButton=true}){string selected=picker.ShowDialog(this)==DialogResult.OK?picker.SelectedPath:null;Post(new{type="response",requestId=requestId,result=selected});}LayoutPage();return;}
   else if(action=="chooseFile"){HidePages();using(var picker=new OpenFileDialog{Title="Atlasで開くファイル",InitialDirectory=Str(m,"path",@"C:\dev"),Filter="対応ファイル|*.txt;*.md;*.markdown;*.csv;*.tsv;*.json;*.html;*.htm;*.pdf;*.mp4;*.webm;*.mov;*.m4v;*.mp3;*.wav;*.m4a;*.ogg;*.flac;*.png;*.jpg;*.jpeg;*.webp;*.gif;*.svg|すべてのファイル|*.*",CheckFileExists=true,Multiselect=false}){string selected=picker.ShowDialog(this)==DialogResult.OK?picker.FileName:null;Post(new{type="response",requestId=requestId,result=selected});}LayoutPage();return;}
@@ -173,9 +193,17 @@ class Workspace : Form {
    e.MenuItems.Insert(0,item);
   };
   page.CoreWebView2.WebMessageReceived+=(s,e)=>{try{var msg=json.Deserialize<Dictionary<string,object>>(e.WebMessageAsJson);if(Str(msg,"type")=="atlas.translation.dirty")Post(new{type="browser.translation-dirty",id=id});}catch{}};
+  page.CoreWebView2.WebMessageReceived+=(s,e)=>{try{
+   if(!IsYouTube(e.Source)||!IsYouTube(page.CoreWebView2.Source)||e.WebMessageAsJson.Length>2000000)return;
+   var msg=json.Deserialize<Dictionary<string,object>>(e.WebMessageAsJson);if(Str(msg,"type")!="atlas.youtube")return;
+   string action=Str(msg,"action"),request=Str(msg,"requestId"),owner;
+   if(action=="captured"){if(!youtubeRequests.TryGetValue(request,out owner)||owner!=id)return;youtubeRequests.Remove(request);Post(new{type="response",requestId=request,result=msg.ContainsKey("payload")?msg["payload"]:null,error=msg.ContainsKey("error")?msg["error"]:null});}
+   else if(action=="retention"||action=="connect"||action=="capture")Post(new{type="browser.youtube",id=id,action=action,videoId=Str(msg,"videoId"),refresh=msg.ContainsKey("refresh")&&Convert.ToBoolean(msg["refresh"])});
+  }catch{}};
   page.CoreWebView2.NavigationCompleted+=(s,e)=>{if(e.IsSuccess)Post(new{type="browser.translation-ready",id=id,url=page.CoreWebView2.Source});};
   BindShortcuts(page,id);page.Enter+=(s,e)=>Post(new{type="browser.focused",id=id});page.CoreWebView2.WebMessageReceived+=(s,e)=>MediaStep(page,e);
   await page.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(File.ReadAllText(Path.Combine(appDir,"native","media-shortcuts.js")));
+  await page.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(File.ReadAllText(Path.Combine(appDir,"native","youtube-tools.js")));
   page.CoreWebView2.DOMContentLoaded+=(s,e)=>MediaSettings(page);
   page.CoreWebView2.NavigationStarting+=(s,e)=>{if(!IsWeb(e.Uri)&&e.Uri!="about:blank"){e.Cancel=true;Post(new{type="browser.error",id=id,error="この種類のリンクは未対応です: "+new Uri(e.Uri).Scheme});}};
   page.CoreWebView2.FaviconChanged+=async(s,e)=>{try{using(var icon=await page.CoreWebView2.GetFaviconAsync(CoreWebView2FaviconImageFormat.Png))using(var bytes=new MemoryStream()){await icon.CopyToAsync(bytes);if(bytes.Length>0&&bytes.Length<=131072)Post(new{type="browser.favicon",id=id,icon="data:image/png;base64,"+Convert.ToBase64String(bytes.ToArray())});}}catch{}};

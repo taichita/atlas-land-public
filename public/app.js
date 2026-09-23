@@ -1,4 +1,6 @@
 import {setupVoice} from './voice-input.js';
+import {Autosave} from './autosave.js';
+import {setupYouTube} from './youtube.js';
 import {usageLimited,aiErrorText} from './ai-errors.js';
 import {tabIcon,svgIcon} from './tab-icons.js';
 import {setupBookmarkFlyout} from './bookmark-flyout.js';
@@ -164,28 +166,35 @@ function upsert(t) {
   else state.tasks[i] = t;
 }
 function preferenceSnapshot(){return {...state.ui,active:state.active,open:state.open,drafts:state.drafts,layout:state.layout,viewTabs:state.viewTabs,activeView:state.activeView};}
+const draftCacheKey='atlas-pending-drafts:'+windowId;
+let lastDraftWarning=0;
+function draftSaveFailed(e){
+  if(!e.status)showServiceDown();
+  if(Date.now()-lastDraftWarning<30000)return;
+  lastDraftWarning=Date.now();
+  toast('保存を再試行します。入力はこの画面に保持しています');
+}
+const preferenceSave=new Autosave({
+  save:value=>api('/preferences',value),
+  cache:value=>{try{localStorage.setItem(draftCacheKey,JSON.stringify(value.drafts||{}));}catch{}},
+  clearCache:()=>{try{localStorage.removeItem(draftCacheKey);}catch{}},
+  onError:draftSaveFailed,
+});
+async function savePreferences(){
+  if(paneMode)return;
+  preferenceSave.queue(preferenceSnapshot());
+  await preferenceSave.flush();
+}
 function prefs() {
   if(closingWindow)return;
   if(paneMode){paneShell?.persist();return;}
-  clearTimeout(prefs.timer);
-  prefs.timer = setTimeout(
-    () =>
-      api("/preferences", {
-        ...state.ui,
-        active: state.active,
-        open: state.open,
-        drafts: state.drafts,
-        layout: state.layout,
-        viewTabs: state.viewTabs,
-        activeView: state.activeView,
-      }).catch((e) => toast("下書きを保存できません: " + e.message)),
-    500,
-  );
+  preferenceSave.queue(preferenceSnapshot());
 }
 window.addEventListener('pagehide',()=>{
   if(paneMode||!state.ui||closingWindow)return;
-  stashDraft();clearTimeout(prefs.timer);
-  api('/preferences',preferenceSnapshot(),true).catch(()=>{});
+  stashDraft();clearTimeout(preferenceSave.timer);
+  preferenceSave.queue(preferenceSnapshot());
+  preferenceSave.flush().catch(()=>{});
 });
 function shortcutBindings() {
   return normalizeShortcutBindings(state.ui.shortcuts);
@@ -634,6 +643,7 @@ async function loadHistory(id, cursor) {
     : [...(result.data || [])].reverse();
   const seen = new Set();
   state.histories.set(id, {
+    compactHistory: !!result.compactHistory || !!existing?.compactHistory,
     turns: turns.filter((t) => !seen.has(t.id) && seen.add(t.id)),
     cursor: result.nextCursor,
     live: new Map((result.live || []).map((i) => [i.id, i])),
@@ -717,6 +727,7 @@ function renderConversation() {
       `<div class="conversation-sync"><span title="${esc(t.syncError || state.desktop?.error || "Codexアプリと同期")}">${t.syncError || state.desktop?.error ? "⇄ Codex · 接続を確認" : "⇄ Codex"}</span><button id="refresh-conversation" title="会話を更新">↻</button></div>`;
   if (!history) html += '<div class="empty">会話を読み込んでいます…</div>';
   else {
+    if(history.compactHistory)html += '<div class="conversation-sync" title="大きな会話は要約表示です。元の会話はCodexに残っています">軽量表示 · 一部の履歴を省略</div>';
     if (history.cursor)
       html += '<button id="load-older" class="older">以前の会話を読む</button>';
     html += conversationHTML(allItems(history));
@@ -1279,7 +1290,7 @@ function refreshRecoveredService() {
   recoveryRefresh=(async()=>{
     // Keep the live DOM, WebViews and editors. Only resync server-owned state.
     stashDraft();
-    if(!paneMode){await paneShell?.save();await saveDrafts();await api('/preferences',preferenceSnapshot());await api('/tabs',{tabs:state.tabs,activeTab:state.activeTab});}
+    if(!paneMode){await paneShell?.save();await saveDrafts();await savePreferences();await api('/tabs',{tabs:state.tabs,activeTab:state.activeTab});}
     const b=await api('/bootstrap');
     for(const key of ['tasks','connected','account','models','error','requests','sequence','serviceId','links','bookmarks','usage','desktop'])state[key]=b[key];
     state.serviceDown=false;closingWindow=false;$('service-reconnect').hidden=true;
@@ -1408,7 +1419,9 @@ async function boot() {
   try {
     const b = await api("/bootstrap");
     Object.assign(state, b);
-    state.ui = b.ui || {};document.body.classList.toggle("sidebar-hidden",!!state.ui.sidebarHidden);renderDefaultFolder();
+    state.ui = b.ui || {};
+    if(!paneMode)try{const cached=JSON.parse(localStorage.getItem(draftCacheKey)||'null');if(cached&&typeof cached==='object'&&!Array.isArray(cached))state.ui.drafts={...state.ui.drafts,...Object.fromEntries(Object.entries(cached).filter(([,v])=>typeof v==='string'))};}catch{}
+    document.body.classList.toggle("sidebar-hidden",!!state.ui.sidebarHidden);renderDefaultFolder();
     state.ui.shortcuts = normalizeShortcutBindings(state.ui.shortcuts);
     syncShortcutSettings();
     if (state.ui.appearanceVersion !== 3) { state.ui.bodySize = Math.max(14, (state.ui.bodySize || 19) - 2); state.ui.appearanceVersion = 3; }
@@ -1708,7 +1721,7 @@ function scheduleDraft() {
   clearTimeout(draftTimer);
   draftTimer = setTimeout(
     () =>
-      saveDrafts().catch((e) => toast("下書きを保管できません: " + e.message)),
+      saveDrafts().catch(draftSaveFailed),
     700,
   );
 }
@@ -2240,7 +2253,10 @@ function showShortcuts() {
   $("dialog").addEventListener("close", () => postHost("window.shortcutCapture", { enabled: false }), { once: true });
   refresh();
 }
+const youtube=setupYouTube({api,host,toast,openDialog,closeDialog,header:dialogHeader,esc,openFile:loadLocalPath});
 async function runShortcut(command, sourceId = null) {
+  if(command==='youtube-capture')return youtube.capture(sourceId||state.activeTab);
+  if(command==='youtube-preview')return host('browser.youtube.preview',{id:sourceId||state.activeTab});
   if(command==='bookmark-page')return bookmarkPage();
   if(command==='bookmarks')return showBookmarks();
   if(command==='new-note')return newNote();
@@ -2324,6 +2340,7 @@ if (native)
     const m = e.data;
     if(!paneMode&&paneShell?.route(m))return;
     pageTranslation.event(m);
+    youtube.event(m).catch(e=>toast(e.message));
     if (m.type === "shortcut") {
       if(!paneMode&&document.activeElement?.id==='secondary-frame'&&m.command==='address'){document.activeElement.contentWindow.postMessage({channel:'atlas-pane-v1',type:'native',message:m},location.origin);return;}
       runShortcut(m.command, m.id).catch((error) => toast(error.message));
@@ -2350,21 +2367,13 @@ if (native)
       if(m.type==='app.closing'&&voice.active()){toast('音声入力を終了してから閉じてください');return;}
       closingWindow=m.type==='app.closing';
       stashDraft();
-      clearTimeout(prefs.timer);
+      clearTimeout(preferenceSave.timer);
       clearTimeout(persistTabs.timer);
       clearTimeout(draftTimer);
       Promise.resolve(paneMode?null:paneShell?.save()).then(()=>Promise.all([
         saveDrafts(),
         api("/tabs", { tabs: state.tabs, activeTab: state.activeTab }),
-        api("/preferences", {
-          ...state.ui,
-          active: state.active,
-          open: state.open,
-          drafts: state.drafts,
-          layout: state.layout,
-          viewTabs: state.viewTabs,
-          activeView: state.activeView,
-        }),
+        savePreferences(),
       ]))
         .then(async() => {if(m.type==='app.closing'){await api('/window/reset',{});postHost("app.exit");}})
         .catch((e) =>

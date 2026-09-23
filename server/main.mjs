@@ -1,6 +1,8 @@
 import {requestResponse} from '../public/approval-forms.js';
 import {usageLimited} from '../public/ai-errors.js';
 import {serviceBinding} from './service-session.mjs';
+import {readTurnHistory} from './turn-history.mjs';
+import {YouTube} from './youtube.mjs';
 import {appendFileSync} from 'node:fs';
 import {readInstallation,applyInstallation,accessModes} from './installation.mjs';
 import {windowState,freshWorkspace,blankUI} from './windows.mjs';
@@ -50,6 +52,7 @@ if(process.env.ATLAS_FRESH_SESSION==='1'){freshWorkspace(store.data);store.flush
 const chromeBookmarks=new ChromeBookmarks(store);
 if(store.data.chromeSync===undefined&&process.env.ATLAS_CHROME_SYNC==='1')store.data.chromeSync=true;
 const connections=new Connections(dataDir,installation?.channel==='internal'?{legacyGroqFile:null}:{});
+const youtube=new YouTube(dataDir);
 const translationDir=path.join(dataDir,'translation');
 await fs.mkdir(translationDir,{recursive:true});
 const pageTranslator=new PageTranslator(bridge,translationDir);
@@ -75,6 +78,7 @@ const serviceId = crypto.randomUUID();
 function serviceLog(event) { try { appendFileSync(path.join(dataDir,'service-lifecycle.log'),new Date().toISOString()+' pid='+process.pid+' '+event+'\n'); } catch {} }
 process.on('uncaughtExceptionMonitor',error=>serviceLog('uncaught '+error.name+' '+error.message));
 process.on('exit',code=>serviceLog('exit code='+code));
+bridge.on('responseTooLarge',()=>serviceLog('codex.response-too-large'));
 const started = Date.now(),
   subscribers = new Set(),
   events = [],
@@ -746,6 +750,11 @@ const server = http.createServer(async (req, res) => {
         return json(res,await connections.transcribe(Buffer.concat(chunks),String(req.headers['content-type']||''),url.searchParams.get('provider')||'auto'));
       }
       const b = req.method === "POST" ? await body(req) : {};
+      if(pathname==='/api/youtube/status')return json(res,await youtube.status());
+      if(pathname==='/api/youtube/configure'&&req.method==='POST')return json(res,await youtube.configure(b));
+      if(pathname==='/api/youtube/authorize'&&req.method==='POST')return json(res,await youtube.authorize());
+      if(pathname==='/api/youtube/retention')return json(res,await youtube.retention(url.searchParams.get('video'),url.searchParams.get('refresh')==='1'));
+      if(pathname==='/api/youtube/capture'&&req.method==='POST')return json(res,await youtube.capture(b));
       if(pathname==='/api/connections')return json(res,req.method==='POST'?await connections.save(b):await connections.status());
       if(pathname==='/api/connections/file'&&req.method==='POST')return json(res,await connections.ensureFile());
       const imageRemove=pathname.match(/^\/api\/tasks\/([^/]+)\/images\/remove$/);
@@ -827,7 +836,7 @@ const server = http.createServer(async (req, res) => {
         if(!/^[a-z0-9-]{1,64}$/i.test(windowId))fail('Invalid window',400);
         windowState(store.data,windowId).ui=b;
         if(windowId==='main')store.data.ui = b;
-        store.save();
+        store.flush();
         return json(res, { ok: true });
       }
       if(pathname==='/api/window/reset'&&req.method==='POST'){
@@ -1016,7 +1025,7 @@ const server = http.createServer(async (req, res) => {
           if(t.external)await desktopSync.read(t);
           else {
             await ensureLoaded(t);
-            const [{thread},history]=await Promise.all([bridge.call('thread/read',{threadId:t.id,includeTurns:false}),bridge.call('thread/turns/list',{threadId:t.id,itemsView:'full',limit:1,sortDirection:'desc'})]);
+            const [{thread},history]=await Promise.all([bridge.call('thread/read',{threadId:t.id,includeTurns:false}),readTurnHistory(bridge,{threadId:t.id,limit:1,sortDirection:'desc'})]);
             const latest=history.data?.[0];t.state=runtimeState(thread.status,latest);t.activeTurn=['running','waiting'].includes(t.state)?latest?.id:null;t.error=null;
           }
           t.syncError=null;update(t);return json(res,t);
@@ -1093,7 +1102,7 @@ const server = http.createServer(async (req, res) => {
             return json(res, { data: [], nextCursor: null, live: [] });
           }
           await connect();
-          const result = await bridge.call("thread/turns/list", {
+          const result = await readTurnHistory(bridge, {
             threadId: t.id,
             itemsView: "full",
             limit: 12,
@@ -1424,6 +1433,7 @@ const server = http.createServer(async (req, res) => {
 function shutdown(reason) {
   serviceLog('shutdown reason='+reason);
   desktopSync.close();
+  youtube.close();
   store.flush();
   bridge.close();
   server.close();

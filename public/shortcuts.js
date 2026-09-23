@@ -1,4 +1,6 @@
 export const shortcutDefinitions = [
+  { command: 'youtube-capture', group: 'YouTube', label: '文字起こしとスクショを保存', keys: 'Ctrl+Shift+Y' },
+  { command: 'youtube-preview', group: 'YouTube', label: 'おすすめ欄の見え方', keys: 'Ctrl+Alt+Y' },
   { command: "bookmark-page", group: "Web", label: "このページをブックマーク", keys: "Ctrl+D" },
   { command: "bookmarks", group: "Web", label: "ブックマークを開く", keys: "Ctrl+Shift+O" },
   { command: "new-note", group: "ファイル", label: "新しいメモ", keys: "Ctrl+Alt+N" },

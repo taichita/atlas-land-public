@@ -26,6 +26,7 @@ jobs:
       - run: node test/ui-check.mjs
       - run: node test/ui-history.mjs
       - run: node test/service-recovery-e2e.mjs
+      - run: node test/youtube-e2e.mjs
       - run: node test/pane-zoom-e2e.mjs
       - run: node test/bookmarks-e2e.mjs
       - run: node test/notes-e2e.mjs

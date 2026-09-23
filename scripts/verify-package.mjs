@@ -16,4 +16,5 @@ const require=createRequire(path.join(root,'package.json'));
 for(const name of Object.keys(require('./package.json').dependencies))assert(require.resolve(name).startsWith(root));
 await fs.access(path.join(root,'dist','AtlasBrowser.exe'));
 await fs.access(path.join(root,'native','page-translation.js'));
+await fs.access(path.join(root,'native','youtube-tools.js'));
 console.log(`Package verified: ${manifest.files.length} files, runtime dependencies resolve, no user profiles or development tests.`);

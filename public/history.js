@@ -20,6 +20,7 @@ export function mergeRecentHistory(previous, result) {
   const oldest = previous?.turns?.[0];
   const keepCursor = oldest && !recent.some(t => t.id === oldest.id);
   return {
+    compactHistory: !!result.compactHistory || !!previous?.compactHistory,
     turns: [...turns.values()].sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0)),
     cursor: previous?.cursor === null || keepCursor ? previous.cursor : result.nextCursor,
     live: new Map(),

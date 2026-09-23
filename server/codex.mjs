@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
+import { BoundedLines } from './bounded-lines.mjs';
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
@@ -61,7 +61,15 @@ export class CodexBridge extends EventEmitter {
     this.proc.stderr.on("data", (b) => {
       this.lastError = (this.lastError + b.toString()).slice(-6000);
     });
-    createInterface({ input: this.proc.stdout }).on("line", (line) => {
+    const lines = new BoundedLines({
+      onOverflow: () => {
+        const error = Object.assign(new Error('Codexの応答が大きすぎて受信できませんでした。指示を送った場合は、再送前に会話を確認してください'), {code:'ATLAS_RESPONSE_TOO_LARGE'});
+        // A discarded frame may have its id at the end. Reject outstanding
+        // calls rather than guessing an id or silently retrying a mutation.
+        this.fail(error);
+        this.emit('responseTooLarge');
+      },
+      onLine: (line) => {
       let m;
       try {
         m = JSON.parse(line);
@@ -79,14 +87,17 @@ export class CodexBridge extends EventEmitter {
       if (m.error)
         p.reject(Object.assign(new Error(m.error.message || JSON.stringify(m.error)),{code:m.error.code,data:m.error.data,codexErrorInfo:m.error.codexErrorInfo||m.error.data?.codexErrorInfo}));
       else p.resolve(m.result);
-    });
+    }});
+    this.proc.stdout.on('data', chunk => lines.write(chunk));
+    this.proc.stdout.on('error', e => this.fail(e));
+    this.proc.stdin.on('error', e => this.fail(e));
     const init = await this.call(
       "initialize",
       {
         clientInfo: {
           name: "personal_ai_workspace",
           title: "Atlas Browser",
-          version: "0.4.1",
+          version: "0.4.2",
         },
         capabilities: { experimentalApi: true },
       },

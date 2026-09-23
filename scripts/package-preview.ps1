@@ -32,11 +32,12 @@ foreach($taskName in @('AtlasBrowser.exe','AtlasBrowser.exe.config','AtlasLand.e
 }
 Copy-ReleaseFile (Join-Path $taskRoot 'native\media-shortcuts.js') 'native\media-shortcuts.js'
 Copy-ReleaseFile (Join-Path $taskRoot 'native\page-translation.js') 'native\page-translation.js'
+Copy-ReleaseFile (Join-Path $taskRoot 'native\youtube-tools.js') 'native\youtube-tools.js'
 Copy-ReleaseFile (Join-Path $taskRoot 'scripts\claude-statusline.mjs') 'scripts\claude-statusline.mjs'
 Copy-ReleaseFile (Join-Path $taskRoot 'docs\preview-start.md') 'はじめに.md'
 Copy-ReleaseFile (Join-Path $taskRoot 'docs\shortcuts-and-local-tools.md') '操作方法.md'
 Copy-ReleaseFile (Join-Path $taskRoot 'docs\workplace-review.md') '職場での利用確認.md'
-foreach($taskDoc in @('multiple-windows','appearance','quick-notes','bookmarks','vertical-tabs','translation','updates','recovery','host-recovery','personalization')){
+foreach($taskDoc in @('multiple-windows','appearance','quick-notes','bookmarks','vertical-tabs','translation','updates','recovery','host-recovery','personalization','youtube')){
  Copy-ReleaseFile (Join-Path $taskRoot "docs\$taskDoc.md") "docs\$taskDoc.md"
 }
 Copy-ReleaseFile (Join-Path $taskRoot 'node_modules\safer-buffer\LICENSE') 'licenses\safer-buffer-LICENSE.txt'
