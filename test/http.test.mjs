@@ -6,7 +6,7 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 test("local HTTP service persists drafts, streams media ranges and isolates previews", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "workspace-http-")),
+  const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "workspace-http-"))),
     cwd = path.join(dir, "project"),
     data = path.join(dir, "data");
   await fs.mkdir(cwd);
