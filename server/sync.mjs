@@ -32,8 +32,8 @@ export async function releaseLocalTask(t,{sending,loaded,bridge,update}) {
 }
 
 export class DesktopSync {
-  constructor({ store, bridge, connect, update, emit, cleanItem, releaseLocal, desktop = new DesktopBridge() }) {
-    Object.assign(this, { store, bridge, connect, update, emit, cleanItem, releaseLocal, desktop });
+  constructor({ store, bridge, connect, update, emit, cleanItem, releaseLocal, recovery, desktop = new DesktopBridge() }) {
+    Object.assign(this, { store, bridge, connect, update, emit, cleanItem, releaseLocal, recovery, desktop });
     this.cursors = new Map(); this.signatures = new Map(); this.taskSignatures = new Map(); this.loadedHistory = new Map();
     this.contextPending = null; this.busy = false; this.lastList = 0; this.active = null;
     this.enabled = process.env.GPT_ATLAS_DESKTOP_SYNC !== "0";
@@ -60,6 +60,19 @@ export class DesktopSync {
     return this.desktop.call(name, args, await this.context(), timeout);
   }
   touch(id, force = false) { this.active = id || null; this.visibleUntil = Date.now() + 35000; return this.tick(force); }
+  recover() {
+    if(this.pendingRecovery)return this.pendingRecovery;
+    this.pendingRecovery=this.performRecovery().finally(()=>{this.pendingRecovery=null;});
+    return this.pendingRecovery;
+  }
+  async performRecovery() {
+    if(!this.enabled)throw new Error('Codexアプリとの同期が無効です');
+    await this.pendingTick;
+    this.desktop.reset?.();this.lastList=0;this.cursors.clear();
+    await this.touch(this.active,true);
+    if(!this.available)await this.recovery?.failed({force:true});
+    return {available:this.available,error:this.lastError,recovery:this.recovery?.status()};
+  }
   start() { this.timer = setInterval(() => this.tick().catch(() => {}), 2000); this.timer.unref(); }
   close() { clearInterval(this.timer); this.desktop.close(); }
   tick(force = false) {
@@ -75,7 +88,7 @@ export class DesktopSync {
     this.lastTick = Date.now();
     this.busy = true;
     try {
-      if (force || Date.now() - this.lastList > 12000) {
+      if (force || !this.available || Date.now() - this.lastList > 12000) {
         const list = await this.call("list_threads", { limit: 50 });
         this.lastList = Date.now();
         const entries = [...(list.pinnedThreads || []), ...(list.threads || [])];
@@ -116,10 +129,14 @@ export class DesktopSync {
         }
       }
       this.available = true; this.lastError = "";
+      this.recovery?.healthy();
     } catch (e) {
       this.available = false; this.lastError = e.message;
       // A disconnected observer must never declare someone else's work finished.
       this.lastList = Date.now() - 6000;
+      // Recovery owns only process activation. Never resend the user's AI request.
+      // Do not hold the sync loop while the Store is checking/installing an update.
+      if(this.store.data.tasks.some(t=>t.external&&t.hasConversation))this.recovery?.failed();
     } finally {
       const connection = JSON.stringify({ available: this.available, error: this.lastError });
       if (this.connectionSignature !== connection) { this.connectionSignature = connection; this.emit("desktopConnection", JSON.parse(connection)); }

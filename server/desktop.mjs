@@ -108,6 +108,12 @@ export class DesktopBridge {
     this.pending.clear();
     this.tools.clear();
   }
+  reset() {
+    // A pending send might already have reached Codex. Do not break or replay it.
+    if(this.connecting || this.pending.size)return false;
+    this.socket?.destroy();this.socket=null;this.buffer=Buffer.alloc(0);this.tools.clear();
+    return true;
+  }
   close() { this.closed = true; this.socket?.destroy(); this.fail(new Error("接続を終了しました")); }
 }
 

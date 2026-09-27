@@ -1,5 +1,6 @@
 import {setupVoice} from './voice-input.js';
 import {Autosave} from './autosave.js';
+import {mountDesktopRecovery} from './desktop-recovery.js';
 import {setupYouTube} from './youtube.js';
 import {usageLimited,aiErrorText} from './ai-errors.js';
 import {tabIcon,svgIcon} from './tab-icons.js';
@@ -724,7 +725,7 @@ function renderConversation() {
   let html = "";
   if (t.external)
     html =
-      `<div class="conversation-sync"><span title="${esc(t.syncError || state.desktop?.error || "Codexアプリと同期")}">${t.syncError || state.desktop?.error ? "⇄ Codex · 接続を確認" : "⇄ Codex"}</span><button id="refresh-conversation" title="会話を更新">↻</button></div>`;
+      `<div class="conversation-sync"><span title="${esc(t.syncError || state.desktop?.error || "Codexアプリと同期")}">${t.syncError || state.desktop?.error ? '⇄ '+esc(state.desktopRecovery?.message||'Codex · 接続を確認') : "⇄ Codex"}</span><button id="refresh-conversation" title="会話を更新">↻</button>${t.syncError||state.desktop?.error?'<button id="recover-desktop-conversation">復旧</button>':''}</div>`;
   if (!history) html += '<div class="empty">会話を読み込んでいます…</div>';
   else {
     if(history.compactHistory)html += '<div class="conversation-sync" title="大きな会話は要約表示です。元の会話はCodexに残っています">軽量表示 · 一部の履歴を省略</div>';
@@ -754,6 +755,7 @@ $("conversation").addEventListener("click", async (e) => {
       if(typeof text==='string'){await navigator.clipboard.writeText(text);toast('コピーしました');}return;
     }
     if (e.target.id === "refresh-conversation") await loadHistory(state.active);
+    if(e.target.id==='recover-desktop-conversation'){await api('/desktop/recover',{});toast('Codexとの接続を復旧します');}
     if (e.target.id === "load-older")
       await loadHistory(
         state.active,
@@ -1146,6 +1148,7 @@ async function settings() {
     dialogHeader("設定") +
       `<div class="metric-line"><span>Codex</span><strong>${state.connected ? "接続済み" : "未接続"}</strong></div><div class="metric-line"><span>アカウント</span><strong>${esc(state.account?.plan || state.account?.type || "未ログイン")}</strong></div><div class="metric-line"><span>バックエンドのメモリ</span><strong>${Math.round(m.node.rss / 1048576)} MB</strong></div><div class="form-field" style="margin-top:22px"><label for="reading-size">本文の大きさ</label><input id="reading-size" type="range" min="14" max="26" value="${state.ui.bodySize || 17}"></div><div class="dialog-actions"><button id="reconnect">再接続</button>${!state.account ? '<button id="login" class="primary">ChatGPTでログイン</button>' : ""}</div>`,
   );
+  mountDesktopRecovery($('dialog'),{api,toast,openWeb}).catch(e=>toast(e.message));
   const shortcutButton = document.createElement("button");
   const accessField=document.createElement('div');accessField.className='form-field';accessField.innerHTML='<label for="default-access">新しい案件の権限</label><select id="default-access"><option value="danger-full-access">通常 · PC全体の操作を許可（確認なし）</option><option value="workspace-write">作業フォルダ内の編集 · 範囲外は確認</option><option value="read-only">読み取りのみ · 変更は確認</option></select>';
   $('dialog').querySelector('.dialog-actions').before(accessField);$('default-access').value=state.defaultAccess||'danger-full-access';$('default-access').onchange=async e=>{try{state.defaultAccess=(await api('/default-access',{access:e.target.value})).access;toast('新しい案件に適用します');}catch(error){toast(error.message);}};
@@ -1330,6 +1333,11 @@ function handleEvent(e) {
   if(e.type==='noteSaved'){noteSaved(e.data);return;}
   if(e.type==='appearance'){setAppearance(e.data);return;}
   if (e.type === "desktopConnection") { state.desktop = e.data; if (task()?.external) scheduleConversation(); }
+  if(e.type==='desktopRecovery'){
+    state.desktopRecovery=e.data;
+    const label=$('desktop-recovery-status');if(label)label.textContent=e.data.message;
+    if(task()?.external)scheduleConversation();
+  }
   if (e.type === "historyUpdated") {
     mergeHistory(e.data.threadId, e.data);
     if (state.active === e.data.threadId) { scheduleConversation(); markSeen(); }

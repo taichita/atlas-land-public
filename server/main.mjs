@@ -23,6 +23,7 @@ import { CodexBridge } from "./codex.mjs";
 import { StateStore } from "./state.mjs";
 import {defaultPolicy,policyFor,policyHash,policyUpdate} from './agent-policy.mjs';
 import { DesktopSync, desktopMessage, releaseLocalTask, runtimeState } from "./sync.mjs";
+import {DesktopRecovery} from './desktop-recovery.mjs';
 import { codexUsage, claudeUsage, enableClaudeUsage } from "./usage.mjs";
 import {
   readFile,
@@ -124,7 +125,12 @@ function update(t) {
 }
 const sending = new Set();
 const releaseLocal=t=>releaseLocalTask(t,{sending,loaded,bridge,update});
-const desktopSync = new DesktopSync({ store, bridge, connect, update, emit, cleanItem: publicItem, releaseLocal });
+const desktopRecovery=new DesktopRecovery({
+  settings:()=>store.data.desktopRecovery||{},
+  save:patch=>{store.data.desktopRecovery={...store.data.desktopRecovery,...patch};store.flush();},
+  emit:status=>emit('desktopRecovery',status),log:serviceLog,
+});
+const desktopSync = new DesktopSync({ store, bridge, connect, update, emit, cleanItem: publicItem, releaseLocal, recovery:desktopRecovery });
 desktopSync.start();
 const savingNotes=new Set();
 function fileLink(t, file, kind = "file", source = "observed") {
@@ -847,6 +853,18 @@ const server = http.createServer(async (req, res) => {
       if (pathname === "/api/connect" && req.method === "POST") {
         await connect();
         return json(res, { connected, account, models });
+      }
+      if(pathname==='/api/desktop/recovery'&&req.method==='GET')return json(res,desktopRecovery.status());
+      if(pathname==='/api/desktop/recovery'&&req.method==='POST'){
+        for(const key of ['enabled','autoUpdate'])if(typeof b[key]==='boolean'){
+          store.data.desktopRecovery={...store.data.desktopRecovery,[key]:b[key]};
+        }
+        store.flush();return json(res,desktopRecovery.status());
+      }
+      if(pathname==='/api/desktop/recover'&&req.method==='POST'){
+        // Return promptly; connection events report progress without reloading drafts.
+        desktopSync.recover().catch(e=>serviceLog('desktop.recovery failed '+e.message));
+        return json(res,{ok:true});
       }
       if (pathname === "/api/login" && req.method === "POST") {
         await bridge.ready();

@@ -39,7 +39,14 @@ try {
  assert.equal(await page.locator('#panes').isVisible(),false);
  assert.equal(await page.locator('#secondary-frame').isVisible(),true);
  await page.locator('#work-tabs button[data-view]').filter({hasText:'review.md'}).click();
- await page.locator('#app-menu summary').click();await page.locator('#settings-button').click();await page.getByRole('button',{name:'実行方針',exact:true}).click();
+ await page.locator('#app-menu summary').click();await page.locator('#settings-button').click();
+ await page.locator('#desktop-auto-recover').waitFor();
+ await Promise.all([page.waitForResponse(r=>r.url().endsWith('/api/desktop/recovery')&&r.request().method()==='POST'),page.locator('#desktop-auto-recover').uncheck()]);
+ await Promise.all([page.waitForResponse(r=>r.url().endsWith('/api/desktop/recovery')&&r.request().method()==='POST'),page.locator('#desktop-auto-update').uncheck()]);
+ const recoverySettings=await (await fetch(url.origin+'/api/desktop/recovery',{headers})).json();
+ assert.equal(recoverySettings.enabled,false);assert.equal(recoverySettings.autoUpdate,false);
+ await Promise.all([page.waitForResponse(r=>r.url().endsWith('/api/desktop/recover')&&r.request().method()==='POST'&&r.status()===200),page.locator('#desktop-recover-now').click()]);
+ await page.getByRole('button',{name:'実行方針',exact:true}).click();
  await page.locator('#agent-policy').fill('検証用の短い方針');
  await Promise.all([page.waitForResponse(r=>r.url().endsWith('/api/agent-policy')&&r.request().method()==='POST'),page.locator('#policy-save').click()]);
  assert.equal((await (await fetch(url.origin+'/api/agent-policy',{headers})).json()).instructions,'検証用の短い方針');
