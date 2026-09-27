@@ -91,6 +91,7 @@ test("desktop IPC decodes fragmented frames and propagates tool errors", async (
       data = Buffer.concat([data, chunk]);
       while (data.length >= 4 && data.length >= data.readUInt32LE(0) + 4) {
         const n = data.readUInt32LE(0), m = JSON.parse(data.subarray(4, n + 4)); data = data.subarray(n + 4);
+        if(m.method==='tools/call')assert.equal(m.params.callerSource,'codex','Updated desktop protocol requires callerSource');
         const result = m.method === "tools/list" ? { tools: ["list_threads", "read_thread", "wait_threads", "send_message_to_thread"].map(name => ({ name, namespace: "codex_app" })) } : { success: false, contentItems: [{ type: "inputText", text: "rejected" }] };
         const body = Buffer.from(JSON.stringify({ id: m.id, result })), header = Buffer.alloc(4); header.writeUInt32LE(body.length);
         socket.write(header.subarray(0, 2)); setTimeout(() => socket.write(Buffer.concat([header.subarray(2), body])), 3);

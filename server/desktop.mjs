@@ -95,6 +95,7 @@ export class DesktopBridge {
     if(!tool)throw new Error('このCodexアプリからは画面を開けません。Codex側で該当するタスクを開いてください');
     if (!callerId) throw new Error("案件を選んでください");
     const result = await this.request("tools/call", {
+      callerSource: "codex",
       namespace: tool.namespace, tool: name, arguments: args,
       threadId: callerId, turnId: "atlas-ui-" + crypto.randomUUID(),
       callId: "atlas-ui-" + crypto.randomUUID(),
